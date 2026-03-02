@@ -1,0 +1,96 @@
+{
+  "version": "v1",
+  "source_pdf": "__fixtures__/fixture.pdf",
+  "pages": [
+    {
+      "page": 1,
+      "type": "toc",
+      "prose_kr": "차례",
+      "expected_block_types": ["heading", "paragraph"],
+      "reading_order_snippets": ["차례", "1장"]
+    },
+    {
+      "page": 2,
+      "type": "toc",
+      "prose_kr": "3장 시스템 설계 면접 공략법",
+      "expected_block_types": ["heading", "paragraph"],
+      "reading_order_snippets": ["3장", "4장"]
+    },
+    {
+      "page": 3,
+      "type": "toc",
+      "prose_kr": "8장 URL 단축기 설계",
+      "expected_block_types": ["heading", "paragraph"],
+      "reading_order_snippets": ["8장", "9장"]
+    },
+    {
+      "page": 4,
+      "type": "toc",
+      "prose_kr": "12장 채팅 시스템 설계",
+      "expected_block_types": ["heading", "paragraph"],
+      "reading_order_snippets": ["12장", "13장"]
+    },
+    {
+      "page": 5,
+      "type": "toc",
+      "prose_kr": "16장 배움은 계속된다",
+      "expected_block_types": ["heading", "paragraph"],
+      "reading_order_snippets": ["16장", "후기"]
+    },
+    {
+      "page": 6,
+      "type": "prose",
+      "prose_kr": "직업을 구한다는 것은 어려운 일이다.",
+      "prose_mixed": "System Design",
+      "expected_block_types": ["heading", "paragraph"],
+      "reading_order_snippets": ["옮긴이의 글", "직업을 구한다는"]
+    },
+    {
+      "page": 7,
+      "type": "prose",
+      "prose_kr": "시스템 디자인 면접 기법을 배우기로 결정한 여러분, 환영한다.",
+      "prose_mixed": "open ended",
+      "expected_block_types": ["heading", "paragraph"],
+      "reading_order_snippets": ["지은이의 글", "시스템 디자인 면접"]
+    },
+    {
+      "page": 10,
+      "type": "chapter",
+      "prose_kr": "사용자 수에 따른 규모 확장성",
+      "expected_block_types": ["heading", "paragraph"],
+      "reading_order_snippets": ["1장", "단일 서버"]
+    },
+    {
+      "page": 11,
+      "type": "diagram+prose",
+      "prose_kr": "이 그림의 시스템 구성을 이해하기 위해서는",
+      "prose_mixed": "api.mysite.com",
+      "expected_block_types": ["caption", "paragraph"],
+      "reading_order_snippets": ["그림1-1", "그림1-2"]
+    },
+    {
+      "page": 12,
+      "type": "prose+code",
+      "prose_kr": "DNS 조회 결과로 IP 주소가 반환된다.",
+      "prose_mixed": "HTTP JSON",
+      "code": "{\n\"id\":12,\n\"firstName\":\"John\",\n\"lastName\": \"Smith\",\n\"address\":{\n}",
+      "expected_block_types": ["paragraph", "code"],
+      "reading_order_snippets": ["DNS 조회 결과", "GET /users/12"]
+    },
+    {
+      "page": 13,
+      "type": "diagram+prose",
+      "prose_kr": "어떤 데이터베이스를 사용할 것인가?",
+      "prose_mixed": "MySQL PostgreSQL",
+      "expected_block_types": ["heading", "paragraph", "caption"],
+      "reading_order_snippets": ["데이터베이스", "어떤 데이터베이스를"]
+    },
+    {
+      "page": 14,
+      "type": "prose",
+      "prose_kr": "수직적 규모 확장 vs 수평적 규모 확장",
+      "expected_block_types": ["heading", "paragraph"],
+      "reading_order_snippets": ["수직적 규모 확장", "수평적 규모 확장"]
+    }
+  ]
+}

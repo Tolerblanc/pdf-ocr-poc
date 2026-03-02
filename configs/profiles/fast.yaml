@@ -1,0 +1,5 @@
+name: fast
+dpi: 220
+tesseract_lang: eng+kor
+tesseract_psm: 6
+max_workers: 4

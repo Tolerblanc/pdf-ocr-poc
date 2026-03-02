@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local/pdf-ocr-poc/schema/ocr-page-v1.json",
+  "title": "OCR Page v1",
+  "type": "object",
+  "required": [
+    "page",
+    "width",
+    "height",
+    "is_blank",
+    "text",
+    "blocks"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "page": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "is_blank": {
+      "type": "boolean"
+    },
+    "text": {
+      "type": "string"
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "text",
+          "bbox",
+          "block_type",
+          "confidence",
+          "reading_order"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "bbox": {
+            "type": "object",
+            "required": ["x0", "y0", "x1", "y1"],
+            "additionalProperties": false,
+            "properties": {
+              "x0": {"type": "number"},
+              "y0": {"type": "number"},
+              "x1": {"type": "number"},
+              "y1": {"type": "number"}
+            }
+          },
+          "block_type": {
+            "type": "string",
+            "enum": ["heading", "paragraph", "code", "caption"]
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "reading_order": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    }
+  }
+}

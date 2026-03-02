@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-ocr-poc"
+version = "0.1.0"
+description = "Local-only OCR POC for Korean technical PDFs on Apple Silicon"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "hyunjun" }
+]
+dependencies = [
+  "PyYAML>=6.0",
+  "jsonschema>=4.23.0",
+  "ocrmypdf>=17.3.0",
+  "psutil>=7.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0"
+]
+paddle = [
+  "paddleocr>=3.0.0"
+]
+apple_vision = [
+  "pyobjc-core>=12.1",
+  "pyobjc-framework-Cocoa>=12.1",
+  "pyobjc-framework-Quartz>=12.1",
+  "pyobjc-framework-Vision>=12.1"
+]
+
+[project.scripts]
+ocrpoc = "pdf_ocr_poc.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+  "integration: fixture-based integration tests"
+]
