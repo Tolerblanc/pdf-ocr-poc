@@ -26,6 +26,17 @@ make build-all   # Go + Swift provider
 
 If build fails with Swift SDK/toolchain mismatch, align Xcode/CommandLineTools and retry.
 
+Fallback behavior:
+
+- `doctor.sh` auto-selects a compatible SDK when default SDK is incompatible.
+- You can force SDK selection with `SWIFT_SDK_PATH`.
+
+Example:
+
+```bash
+SWIFT_SDK_PATH=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk ./build.sh
+```
+
 Binary path:
 
 `v2/providers/vision-swift/bin/vision-provider`

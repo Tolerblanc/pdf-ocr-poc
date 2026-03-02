@@ -66,9 +66,9 @@ Output (provider -> Go):
 - Completed: Swift Vision provider implementation draft (`v2/providers/vision-swift/main.swift`) with OCR + artifact generation.
 - Completed: repository cleanup to v2-centered layout (legacy v1 Python pipeline code removed).
 - Completed: root `Makefile` workflow (`doctor`, `build`, `test`, `smoke`, `package`, `brew-formula`).
-- Pending: Swift provider runtime validation in this environment and `max_workers` page-level parallelization.
-- Environment blocker observed: local Swift compiler/SDK mismatch prevents building Foundation-based binaries in current shell; provider scaffold is checked in but not executable until toolchain alignment.
-- Added helper: `v2/providers/vision-swift/doctor.sh` for environment diagnostics.
+- Completed: Swift provider runtime validation in this environment using fallback SDK auto-selection.
+- Completed: `doctor.sh`/`build.sh` fallback SDK selection for toolchain-SDK mismatch recovery.
+- Pending: `max_workers` page-level parallelization in Swift provider.
 
 ## Acceptance for M1
 

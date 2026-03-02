@@ -1,6 +1,6 @@
-# ocrpoc-go (v2 skeleton)
+# ocrpoc-go
 
-Go-based CLI skeleton for v2 orchestration.
+Go-based OCR orchestration CLI.
 
 ## Build
 
@@ -75,6 +75,7 @@ Vision provider notes:
 - `max_workers` is parsed but page-level parallel OCR is still TODO.
 - Build can fail if local Swift toolchain and SDK are mismatched.
 - Use `v2/providers/vision-swift/doctor.sh` to diagnose Swift toolchain issues.
+- `doctor.sh`/`build.sh` can auto-select a compatible fallback SDK; override with `SWIFT_SDK_PATH` if needed.
 
 ## Local-only enforcement (v2)
 

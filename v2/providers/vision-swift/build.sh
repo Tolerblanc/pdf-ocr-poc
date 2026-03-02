@@ -12,5 +12,14 @@ if ! "$SCRIPT_DIR/doctor.sh" >/tmp/vision-provider-doctor.log 2>&1; then
   exit 1
 fi
 
-swiftc "$SCRIPT_DIR/main.swift" -O -o "$OUT_DIR/vision-provider"
+SDK_PATH="$($SCRIPT_DIR/doctor.sh --print-sdk 2>/dev/null || true)"
+if [[ -z "$SDK_PATH" ]]; then
+  cat /tmp/vision-provider-doctor.log
+  echo
+  echo "build aborted: no compatible SDK detected"
+  exit 1
+fi
+
+swiftc -sdk "$SDK_PATH" "$SCRIPT_DIR/main.swift" -O -o "$OUT_DIR/vision-provider"
 echo "built: $OUT_DIR/vision-provider"
+echo "sdk: $SDK_PATH"
