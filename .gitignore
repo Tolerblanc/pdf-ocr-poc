@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pgm
+.DS_Store
+.omx/
+tmp/
+src/*.egg-info/
+artifacts/
+benchmarks/
+__fixtures__/*.pdf
