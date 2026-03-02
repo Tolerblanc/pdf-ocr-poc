@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Tolerblanc/pdf-ocr-poc/v2/provider-contract.schema.json",
+  "title": "ocrpoc-go provider contract",
+  "type": "object",
+  "definitions": {
+    "request": {
+      "type": "object",
+      "required": [
+        "input_pdf",
+        "output_dir",
+        "profile",
+        "local_only",
+        "max_workers",
+        "workers_mode"
+      ],
+      "properties": {
+        "input_pdf": { "type": "string" },
+        "output_dir": { "type": "string" },
+        "profile": { "type": "string" },
+        "local_only": { "type": "boolean" },
+        "max_workers": { "type": "integer", "minimum": 0 },
+        "workers_mode": { "type": "string", "enum": ["auto", "manual"] },
+        "request_source": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": [
+        "searchable_pdf",
+        "pages_json",
+        "text_path",
+        "markdown_path"
+      ],
+      "properties": {
+        "searchable_pdf": { "type": "string" },
+        "pages_json": { "type": "string" },
+        "text_path": { "type": "string" },
+        "markdown_path": { "type": "string" },
+        "stage_timings": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
