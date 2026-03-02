@@ -6,7 +6,6 @@ __pycache__/
 .DS_Store
 .omx/
 tmp/
-src/*.egg-info/
 v2/bin/
 v2/providers/vision-swift/bin/
 v2/providers/vision-swift/.build/

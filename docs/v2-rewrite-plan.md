@@ -64,6 +64,7 @@ Output (provider -> Go):
 - Completed: local-only monitoring in Go for `exec` providers (process-tree sampling via `lsof` + `pgrep`).
 - Completed: `selfcheck-local-only` command in Go CLI for monitor prerequisite validation.
 - Completed: Swift Vision provider implementation draft (`v2/providers/vision-swift/main.swift`) with OCR + artifact generation.
+- Completed: repository cleanup to v2-centered layout (legacy v1 Python pipeline code removed).
 - Pending: Swift provider runtime validation in this environment and `max_workers` page-level parallelization.
 - Environment blocker observed: local Swift compiler/SDK mismatch prevents building Foundation-based binaries in current shell; provider scaffold is checked in but not executable until toolchain alignment.
 - Added helper: `v2/providers/vision-swift/doctor.sh` for environment diagnostics.

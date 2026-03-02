@@ -1,5 +1,0 @@
-name: quality
-dpi: 320
-tesseract_lang: eng+kor
-tesseract_psm: 3
-max_workers: 2
