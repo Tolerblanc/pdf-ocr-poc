@@ -17,6 +17,13 @@ cd v2/providers/vision-swift
 ./build.sh
 ```
 
+From repository root:
+
+```bash
+make doctor      # includes Swift doctor
+make build-all   # Go + Swift provider
+```
+
 If build fails with Swift SDK/toolchain mismatch, align Xcode/CommandLineTools and retry.
 
 Binary path:

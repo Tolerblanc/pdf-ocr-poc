@@ -9,6 +9,22 @@ cd v2
 go build -o bin/ocrpoc-go ./cmd/ocrpoc-go
 ```
 
+From repository root, you can use:
+
+```bash
+make doctor
+make build
+make test
+make smoke
+```
+
+Packaging / Homebrew helper:
+
+```bash
+make package
+make brew-formula URL=<release-archive-url>
+```
+
 ## Run (mock provider)
 
 ```bash

@@ -15,6 +15,22 @@ cd v2
 go build -o bin/ocrpoc-go ./cmd/ocrpoc-go
 ```
 
+Or use the root Makefile:
+
+```bash
+make doctor
+make build
+make test
+make smoke
+```
+
+Release packaging / Homebrew draft formula:
+
+```bash
+make package
+make brew-formula URL=https://github.com/Tolerblanc/pdf-ocr-poc/releases/download/v0.1.0/ocrpoc-go-v0.1.0-darwin-arm64.tar.gz
+```
+
 ## Core commands
 
 ```bash

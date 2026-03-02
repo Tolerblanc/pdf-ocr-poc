@@ -9,6 +9,7 @@ tmp/
 v2/bin/
 v2/providers/vision-swift/bin/
 v2/providers/vision-swift/.build/
+dist/
 artifacts/
 benchmarks/
 __fixtures__/*.pdf
