@@ -112,3 +112,10 @@ Notes:
 - Local-only mode is enabled by default during pipeline execution.
 - The POC enforces `macOS arm64` runtime.
 - This repository uses a fixed fixture PDF at `__fixtures__/fixture.pdf`.
+
+## V2 (Go rewrite skeleton)
+
+- A Go-based CLI skeleton is available under `v2/`.
+- It currently includes `run`, `batch`, and `eval` commands with provider abstraction.
+- `exec` providers include local-only process-tree network monitoring in Go (`selfcheck-local-only` command included).
+- See `v2/README.md` and `docs/v2-rewrite-plan.md` for build/run details and remaining milestones.
