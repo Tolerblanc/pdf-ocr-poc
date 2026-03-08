@@ -1,6 +1,7 @@
 package postprocess
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -19,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/provider"
 )
 
 const (
@@ -99,14 +102,22 @@ type codexDeviceTokenResponse struct {
 }
 
 type codexCompletionRequest struct {
-	Model       string                   `json:"model"`
-	Messages    []codexCompletionMessage `json:"messages"`
-	Temperature *float64                 `json:"temperature,omitempty"`
+	Model        string              `json:"model"`
+	Instructions string              `json:"instructions"`
+	Input        []codexInputMessage `json:"input"`
+	Store        bool                `json:"store"`
+	Stream       bool                `json:"stream"`
+	Temperature  *float64            `json:"temperature,omitempty"`
 }
 
-type codexCompletionMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+type codexInputMessage struct {
+	Role    string              `json:"role"`
+	Content []codexInputContent `json:"content"`
+}
+
+type codexInputContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 type codexCorrectionResponse struct {
@@ -190,9 +201,14 @@ func (p *codexHeadlessOAuthProvider) Run(ctx context.Context, req ProviderReques
 
 	doc := cloneDocument(req.Document)
 	pageGroups := groupPagesForCodex(doc.Pages, cfg.pageBatchSize)
+	totalPages := 0
+	for _, group := range pageGroups {
+		totalPages += len(group)
+	}
 	requestCount := 0
 	requestSeconds := 0.0
 	warnings := append([]string(nil), authWarnings...)
+	completedPages := 0
 
 	for _, group := range pageGroups {
 		if len(group) == 0 {
@@ -206,6 +222,17 @@ func (p *codexHeadlessOAuthProvider) Run(ctx context.Context, req ProviderReques
 			return ProviderResult{}, err
 		}
 		applyCodexCorrections(&doc, correction, cfg.guard)
+		completedPages += len(group)
+		if req.OnProgress != nil {
+			currentPage := group[len(group)-1].Page
+			req.OnProgress(provider.ProgressEvent{
+				Phase:          "page_done",
+				Stage:          "postprocess",
+				CurrentPage:    currentPage,
+				CompletedPages: completedPages,
+				TotalPages:     totalPages,
+			})
+		}
 	}
 
 	normalizeDocument(&doc)
@@ -674,11 +701,17 @@ func (p *codexHeadlessOAuthProvider) requestCorrections(
 	}
 
 	requestBody := codexCompletionRequest{
-		Model: cfg.model,
-		Messages: []codexCompletionMessage{
-			{Role: "system", Content: cfg.systemPrompt},
-			{Role: "user", Content: buildCodexUserPrompt(string(promptJSON))},
-		},
+		Model:        cfg.model,
+		Instructions: firstNonEmpty(cfg.systemPrompt, defaultCodexSystemPrompt()),
+		Input: []codexInputMessage{{
+			Role: "user",
+			Content: []codexInputContent{{
+				Type: "input_text",
+				Text: buildCodexUserPrompt(string(promptJSON)),
+			}},
+		}},
+		Store:       false,
+		Stream:      true,
 		Temperature: cfg.temperature,
 	}
 	body, err := json.Marshal(requestBody)
@@ -688,6 +721,7 @@ func (p *codexHeadlessOAuthProvider) requestCorrections(
 
 	headers := map[string]string{
 		"Content-Type":  "application/json",
+		"Accept":        "text/event-stream",
 		"Authorization": "Bearer " + authState.accessToken,
 		"User-Agent":    defaultCodexUserAgent,
 		"originator":    "opencode",
@@ -697,20 +731,7 @@ func (p *codexHeadlessOAuthProvider) requestCorrections(
 		headers["ChatGPT-Account-Id"] = authState.accountID
 	}
 
-	responseBody, err := p.doJSONRequest(
-		ctx,
-		client,
-		cfg.timeout,
-		http.MethodPost,
-		cfg.baseURL,
-		bytes.NewReader(body),
-		headers,
-	)
-	if err != nil {
-		return codexCorrectionResponse{}, err
-	}
-
-	responseText, err := extractCodexResponseText(responseBody)
+	responseText, err := p.doCodexResponseRequest(ctx, client, cfg.timeout, cfg.baseURL, bytes.NewReader(body), headers)
 	if err != nil {
 		return codexCorrectionResponse{}, err
 	}
@@ -720,6 +741,44 @@ func (p *codexHeadlessOAuthProvider) requestCorrections(
 		return codexCorrectionResponse{}, fmt.Errorf("parse codex correction response: %w", err)
 	}
 	return correction, nil
+}
+
+func (p *codexHeadlessOAuthProvider) doCodexResponseRequest(
+	ctx context.Context,
+	client *http.Client,
+	timeout time.Duration,
+	url string,
+	body io.Reader,
+	headers map[string]string,
+) (string, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, url, body)
+	if err != nil {
+		return "", err
+	}
+	for key, value := range headers {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		request.Header.Set(key, value)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	responseBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("codex request failed: %s", strings.TrimSpace(string(responseBody)))
+	}
+	if strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") || looksLikeCodexSSE(responseBody) {
+		return extractCodexStreamingResponseText(bytes.NewReader(responseBody))
+	}
+	return extractCodexResponseText(responseBody)
 }
 
 func (p *codexHeadlessOAuthProvider) doJSONRequest(
@@ -975,6 +1034,87 @@ func extractCodexResponseText(body []byte) (string, error) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return "", err
 	}
+	return extractCodexResponseTextPayload(payload)
+}
+
+func extractCodexStreamingResponseText(r io.Reader) (string, error) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+	dataLines := make([]string, 0, 4)
+	textParts := make([]string, 0, 8)
+	completedPayload := map[string]any(nil)
+	flushEvent := func() error {
+		if len(dataLines) == 0 {
+			return nil
+		}
+		payloadText := strings.TrimSpace(strings.Join(dataLines, "\n"))
+		dataLines = dataLines[:0]
+		if payloadText == "" {
+			return nil
+		}
+		if payloadText == "[DONE]" {
+			return nil
+		}
+		payload := map[string]any{}
+		if err := json.Unmarshal([]byte(payloadText), &payload); err != nil {
+			return err
+		}
+		switch payload["type"] {
+		case "response.output_text.delta":
+			if delta, ok := payload["delta"].(string); ok {
+				textParts = append(textParts, delta)
+			}
+		case "response.output_text.done":
+			if text, ok := payload["text"].(string); ok && strings.TrimSpace(text) != "" {
+				textParts = append(textParts, text)
+			}
+		case "response.completed":
+			completedPayload = payload
+		default:
+			if text, err := extractCodexResponseTextPayload(payload); err == nil && strings.TrimSpace(text) != "" {
+				textParts = append(textParts, text)
+			}
+		}
+		return nil
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			if err := flushEvent(); err != nil {
+				return "", err
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	if err := flushEvent(); err != nil {
+		return "", err
+	}
+	joined := strings.TrimSpace(strings.Join(textParts, ""))
+	if joined != "" {
+		return joined, nil
+	}
+	if completedPayload != nil {
+		if responsePayload, ok := completedPayload["response"].(map[string]any); ok {
+			if text, err := extractCodexResponseTextPayload(responsePayload); err == nil && strings.TrimSpace(text) != "" {
+				return text, nil
+			}
+		}
+	}
+	return "", errors.New("codex streaming response did not contain text output")
+}
+
+func looksLikeCodexSSE(body []byte) bool {
+	trimmed := strings.TrimSpace(string(body))
+	return strings.HasPrefix(trimmed, "event:") || strings.HasPrefix(trimmed, "data:")
+}
+
+func extractCodexResponseTextPayload(payload map[string]any) (string, error) {
 	if value, ok := payload["output_text"].(string); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}

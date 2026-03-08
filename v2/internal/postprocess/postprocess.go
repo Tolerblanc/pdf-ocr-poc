@@ -131,6 +131,7 @@ type ProviderRequest struct {
 	Document    Document
 	Config      Config
 	AllowRemote bool
+	OnProgress  provider.ProgressHandler
 }
 
 type ProviderResult struct {
@@ -330,20 +331,26 @@ func Execute(ctx context.Context, p Provider, req Request) (Output, error) {
 		return Output{}, fmt.Errorf("postprocess source pages_json not accessible: %w", err)
 	}
 
-	if req.OnProgress != nil {
-		req.OnProgress(provider.ProgressEvent{Phase: "stage_started", Stage: "postprocess"})
-	}
-
 	startedAt := time.Now()
 	base, err := loadDocument(req)
 	if err != nil {
 		return Output{}, err
 	}
 
+	if req.OnProgress != nil {
+		req.OnProgress(provider.ProgressEvent{
+			Phase:          "stage_started",
+			Stage:          "postprocess",
+			CompletedPages: 0,
+			TotalPages:     len(base.Pages),
+		})
+	}
+
 	result, err := p.Run(ctx, ProviderRequest{
 		Document:    base,
 		Config:      req.Config,
 		AllowRemote: req.AllowRemote,
+		OnProgress:  req.OnProgress,
 	})
 	if err != nil {
 		return Output{}, err
@@ -406,7 +413,12 @@ func Execute(ctx context.Context, p Provider, req Request) (Output, error) {
 	}
 
 	if req.OnProgress != nil {
-		req.OnProgress(provider.ProgressEvent{Phase: "stage_done", Stage: "postprocess"})
+		req.OnProgress(provider.ProgressEvent{
+			Phase:          "stage_done",
+			Stage:          "postprocess",
+			CompletedPages: len(doc.Pages),
+			TotalPages:     len(doc.Pages),
+		})
 	}
 
 	return Output{

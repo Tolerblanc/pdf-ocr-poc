@@ -170,7 +170,7 @@ func describePageProgress(snapshot batch.ProgressSnapshot) string {
 	}
 	pdfName := filepath.Base(snapshot.CurrentInputPDF)
 	stage := displayStageName(snapshot.CurrentStage)
-	if snapshot.CurrentStage == "vision_ocr" && snapshot.TotalPages > 0 {
+	if snapshot.TotalPages > 0 {
 		if snapshot.CurrentPage > 0 {
 			return fmt.Sprintf(" | %s %s %d/%d p%d", stage, pdfName, snapshot.CompletedPages, snapshot.TotalPages, snapshot.CurrentPage)
 		}
@@ -215,28 +215,26 @@ func (r *runProgressRenderer) Render(event provider.ProgressEvent) {
 	}
 
 	line := fmt.Sprintf("%s %s | %s", stage, r.inputPDF, formatDuration(elapsed))
-	if event.Stage == "vision_ocr" && event.TotalPages > 0 {
+	if event.TotalPages > 0 {
 		percent := (float64(event.CompletedPages) / float64(event.TotalPages)) * 100
+		eta := "--:--"
 		rate := 0.0
 		if elapsed > 0 {
 			rate = float64(event.CompletedPages) / elapsed.Seconds()
 		}
-		eta := "--:--"
 		if rate > 0 && event.CompletedPages < event.TotalPages {
 			remaining := float64(event.TotalPages-event.CompletedPages) / rate
 			eta = formatDuration(time.Duration(remaining * float64(time.Second)))
 		}
 		line = fmt.Sprintf(
-			"%s %5.1f%% %d/%d pg | %.2f pg/s | %s<%s | %s %s",
-			renderProgressBar(event.CompletedPages, event.TotalPages, 24),
+			"%s %5.1f%% %d/%d pg | %s<%s | %s",
+			renderProgressBar(event.CompletedPages, event.TotalPages, 18),
 			percent,
 			event.CompletedPages,
 			event.TotalPages,
-			rate,
 			formatDuration(elapsed),
 			eta,
 			stage,
-			r.inputPDF,
 		)
 		if event.Phase == "page_done" && event.CurrentPage > 0 {
 			line += fmt.Sprintf(" p%d", event.CurrentPage)
@@ -328,7 +326,7 @@ func (r *batchProgressRenderer) shouldRenderSnapshot(snapshot batch.ProgressSnap
 }
 
 func (r *runProgressRenderer) shouldRenderEvent(event provider.ProgressEvent, elapsed time.Duration) bool {
-	if event.Stage == "vision_ocr" && event.Phase == "page_started" {
+	if event.TotalPages > 0 && event.Phase == "page_started" {
 		return false
 	}
 	if !r.hasRendered {
@@ -340,8 +338,11 @@ func (r *runProgressRenderer) shouldRenderEvent(event provider.ProgressEvent, el
 	if event.Stage != r.lastEvent.Stage {
 		return true
 	}
-	if event.Stage == "vision_ocr" {
+	if event.TotalPages > 0 {
 		if event.Phase == "document_started" || event.Phase == "document_done" {
+			return true
+		}
+		if event.Phase == "stage_started" || event.Phase == "stage_done" {
 			return true
 		}
 		if event.CompletedPages == 1 {

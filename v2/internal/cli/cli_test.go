@@ -127,7 +127,7 @@ func TestRunCommandShowsProviderProgress(t *testing.T) {
 	if !strings.Contains(stderr.String(), "1/3 pg") {
 		t.Fatalf("expected page progress in stderr, got: %s", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "ocr in.pdf") {
+	if !strings.Contains(stderr.String(), "| ocr p2") {
 		t.Fatalf("expected OCR progress label in stderr, got: %s", stderr.String())
 	}
 }

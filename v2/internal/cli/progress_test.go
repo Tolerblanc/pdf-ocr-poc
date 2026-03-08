@@ -119,14 +119,11 @@ func TestRunProgressRendererShowsPageProgress(t *testing.T) {
 	if !strings.Contains(printed, "1/3 pg") {
 		t.Fatalf("expected page counter in output, got: %q", printed)
 	}
-	if !strings.Contains(printed, "ocr a.pdf") {
-		t.Fatalf("expected stage and pdf name in output, got: %q", printed)
+	if !strings.Contains(printed, "| ocr p2") {
+		t.Fatalf("expected compact OCR stage marker in output, got: %q", printed)
 	}
-	if !strings.Contains(printed, " p2") {
-		t.Fatalf("expected current page marker in output, got: %q", printed)
-	}
-	if !strings.Contains(printed, "pg/s") {
-		t.Fatalf("expected pages throughput label, got: %q", printed)
+	if strings.Contains(printed, "a.pdf") {
+		t.Fatalf("expected compact output without pdf name, got: %q", printed)
 	}
 	if !strings.HasPrefix(printed, "\r[") {
 		t.Fatalf("expected progress bar prefix, got: %q", printed)
@@ -161,5 +158,37 @@ func TestRunProgressRendererUsesSparseLogsWhenNotInteractive(t *testing.T) {
 	}
 	if strings.Contains(printed, "\r[") {
 		t.Fatalf("expected newline logging for non-interactive writer, got: %q", printed)
+	}
+}
+
+func TestRunProgressRendererShowsPostprocessPageProgress(t *testing.T) {
+	out := fakeTTYWriter{}
+	renderer := newRunProgressRenderer(&out, "/tmp/contracts/a.pdf")
+	renderer.Render(provider.ProgressEvent{
+		Phase:          "stage_started",
+		Stage:          "postprocess",
+		CompletedPages: 0,
+		TotalPages:     3,
+	})
+	renderer.Render(provider.ProgressEvent{
+		Phase:          "page_done",
+		Stage:          "postprocess",
+		CurrentPage:    2,
+		CompletedPages: 1,
+		TotalPages:     3,
+	})
+
+	printed := out.String()
+	if !strings.Contains(printed, "1/3 pg") {
+		t.Fatalf("expected page counter in output, got: %q", printed)
+	}
+	if !strings.Contains(printed, "| postprocess p2") {
+		t.Fatalf("expected compact postprocess stage marker in output, got: %q", printed)
+	}
+	if strings.Contains(printed, "a.pdf") {
+		t.Fatalf("expected compact output without pdf name, got: %q", printed)
+	}
+	if !strings.HasPrefix(printed, "\r[") {
+		t.Fatalf("expected progress bar prefix, got: %q", printed)
 	}
 }
