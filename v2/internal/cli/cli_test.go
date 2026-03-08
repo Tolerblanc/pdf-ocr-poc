@@ -47,6 +47,9 @@ func TestRunCommandWithMockProvider(t *testing.T) {
 	if !strings.Contains(stdout.String(), "run_report=") {
 		t.Fatalf("expected run_report output, got: %s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "corrected_pages=") {
+		t.Fatalf("expected corrected_pages output, got: %s", stdout.String())
+	}
 
 	body, err := os.ReadFile(filepath.Join(outDir, "run_report.json"))
 	if err != nil {
@@ -58,6 +61,9 @@ func TestRunCommandWithMockProvider(t *testing.T) {
 	}
 	if report["max_workers_mode"] != "auto" {
 		t.Fatalf("expected auto max_workers_mode, got %v", report["max_workers_mode"])
+	}
+	if report["postprocess_provider"] != "none" {
+		t.Fatalf("expected postprocess_provider=none, got %v", report["postprocess_provider"])
 	}
 }
 

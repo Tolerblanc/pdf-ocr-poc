@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Tolerblanc/pdf-ocr-poc/v2/postprocess-provider.schema.json",
+  "title": "ocrpoc-go postprocess provider contract and config",
+  "type": "object",
+  "definitions": {
+    "provider_name": {
+      "type": "string",
+      "enum": [
+        "none",
+        "local-lm",
+        "cloud-llm",
+        "foundation-models",
+        "codex-headless-oauth"
+      ]
+    },
+    "credential": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": { "const": "none" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "env"],
+          "properties": {
+            "kind": { "const": "env_api_key" },
+            "env": { "type": "string" },
+            "header_name": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "access_token_env"],
+          "properties": {
+            "kind": { "const": "env_oauth_access_token" },
+            "access_token_env": { "type": "string" },
+            "refresh_token_env": { "type": "string" },
+            "account_id_env": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "file"],
+          "properties": {
+            "kind": { "const": "oauth_store_file" },
+            "file": { "type": "string" },
+            "provider_id": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "runtime"],
+          "properties": {
+            "kind": { "const": "local_runtime" },
+            "runtime": {
+              "type": "string",
+              "enum": [
+                "ollama",
+                "llama.cpp",
+                "foundation-models",
+                "builtin"
+              ]
+            },
+            "endpoint": { "type": "string" },
+            "binary": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "guard_policy": {
+      "type": "object",
+      "properties": {
+        "max_edit_distance_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "protect_numbers": { "type": "boolean" },
+        "protect_urls": { "type": "boolean" },
+        "protect_code_blocks": { "type": "boolean" },
+        "emit_page_diff": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "provider_profile": {
+      "type": "object",
+      "required": ["provider"],
+      "properties": {
+        "provider": {
+          "$ref": "#/definitions/provider_name"
+        },
+        "auth_ref": { "type": "string" },
+        "auth": {
+          "$ref": "#/definitions/credential"
+        },
+        "model": { "type": "string" },
+        "base_url": { "type": "string" },
+        "issuer_url": { "type": "string" },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "max_completion_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "page_batch_size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "output_mode": {
+          "type": "string",
+          "enum": [
+            "sidecar_only",
+            "primary_artifacts"
+          ]
+        },
+        "system_prompt": { "type": "string" },
+        "guard": {
+          "$ref": "#/definitions/guard_policy"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtime_override": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "$ref": "#/definitions/provider_name"
+        },
+        "model": { "type": "string" },
+        "base_url": { "type": "string" },
+        "issuer_url": { "type": "string" },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "max_completion_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "output_mode": {
+          "type": "string",
+          "enum": [
+            "sidecar_only",
+            "primary_artifacts"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "configuration_file": {
+      "type": "object",
+      "required": ["version"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "const": "v1alpha1"
+        },
+        "credentials": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/credential"
+          }
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/provider_profile"
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "properties": {
+            "profile": { "type": "string" },
+            "provider": {
+              "$ref": "#/definitions/provider_name"
+            },
+            "allow_remote": { "type": "boolean" },
+            "override": {
+              "$ref": "#/definitions/runtime_override"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "provider_input_document": {
+      "type": "object",
+      "required": [
+        "version",
+        "kind",
+        "engine",
+        "source_pdf",
+        "pages"
+      ],
+      "properties": {
+        "version": { "type": "string" },
+        "kind": { "type": "string" },
+        "engine": { "type": "string" },
+        "source_pdf": { "type": "string" },
+        "generated_at": { "type": "string", "format": "date-time" },
+        "source_artifacts": {
+          "$ref": "corrected-pages.schema.json#/definitions/source_artifacts"
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "$ref": "corrected-pages.schema.json#/definitions/page"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "request": {
+      "type": "object",
+      "required": [
+        "document",
+        "provider",
+        "local_only"
+      ],
+      "properties": {
+        "document": {
+          "$ref": "#\/definitions\/provider_input_document"
+        },
+        "provider": {
+          "$ref": "#/definitions/provider_profile"
+        },
+        "profile": { "type": "string" },
+        "local_only": { "type": "boolean" },
+        "request_source": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": [
+        "document",
+        "provider",
+        "applied"
+      ],
+      "properties": {
+        "document": {
+          "$ref": "corrected-pages.schema.json"
+        },
+        "provider": {
+          "$ref": "#/definitions/provider_name"
+        },
+        "applied": { "type": "boolean" },
+        "changed_pages": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "credential_kind": {
+          "type": "string",
+          "enum": [
+            "none",
+            "env_api_key",
+            "env_oauth_access_token",
+            "oauth_store_file",
+            "local_runtime",
+            "unknown"
+          ]
+        },
+        "model": { "type": "string" },
+        "output_mode": {
+          "type": "string",
+          "enum": [
+            "sidecar_only",
+            "primary_artifacts"
+          ]
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "stage_timings": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

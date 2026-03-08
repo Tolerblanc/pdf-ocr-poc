@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/batch"
 	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/eval"
@@ -57,6 +58,16 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 	profile := fs.String("profile", "fast", "profile name")
 	providerName := fs.String("provider", "mock", "provider name (mock|exec|custom)")
 	providerBin := fs.String("provider-bin", "", "provider executable path")
+	postprocessProvider := fs.String(
+		"postprocess-provider",
+		"",
+		"postprocess provider/profile override (none|local-lm|cloud-llm|foundation-models|codex-headless-oauth)",
+	)
+	postprocessConfig := fs.String(
+		"postprocess-config",
+		"",
+		"postprocess config file path (defaults to OCRPOC_POSTPROCESS_CONFIG)",
+	)
 	maxWorkers := fs.Int("max-workers", 0, "optional manual worker override")
 	localOnly := fs.Bool("local-only", true, "enable local-only mode")
 
@@ -85,8 +96,9 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(
 		stderr,
-		"run config: provider=%s max-workers=%d mode=%s local-only=%t\n",
+		"run config: provider=%s postprocess=%s max-workers=%d mode=%s local-only=%t\n",
 		p.Name(),
+		displayPostprocessProvider(*postprocessProvider),
 		workers,
 		mode,
 		*localOnly,
@@ -94,13 +106,15 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 	renderer := newRunProgressRenderer(stderr, *input)
 
 	output, err := runpkg.Execute(context.Background(), p, runpkg.Options{
-		InputPDF:       *input,
-		OutputDir:      *out,
-		Profile:        *profile,
-		LocalOnly:      *localOnly,
-		MaxWorkers:     workers,
-		MaxWorkersMode: mode,
-		OnProgress:     renderer.Render,
+		InputPDF:              *input,
+		OutputDir:             *out,
+		Profile:               *profile,
+		LocalOnly:             *localOnly,
+		MaxWorkers:            workers,
+		MaxWorkersMode:        mode,
+		PostprocessProvider:   *postprocessProvider,
+		PostprocessConfigPath: *postprocessConfig,
+		OnProgress:            renderer.Render,
 	})
 	renderer.Finish()
 	if err != nil {
@@ -117,6 +131,9 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "run_report=%s\n", output.RunReportPath)
 	fmt.Fprintf(stdout, "local_only_report=%s\n", output.LocalOnlyReportPath)
 	fmt.Fprintf(stdout, "searchable_pdf=%s\n", output.Result.SearchablePDF)
+	if output.Postprocess.CorrectedPagesJSON != "" {
+		fmt.Fprintf(stdout, "corrected_pages=%s\n", output.Postprocess.CorrectedPagesJSON)
+	}
 	return 0
 }
 
@@ -129,6 +146,16 @@ func batchCommand(args []string, stdout, stderr io.Writer) int {
 	profile := fs.String("profile", "fast", "profile name")
 	providerName := fs.String("provider", "mock", "provider name (mock|exec|custom)")
 	providerBin := fs.String("provider-bin", "", "provider executable path")
+	postprocessProvider := fs.String(
+		"postprocess-provider",
+		"",
+		"postprocess provider/profile override (none|local-lm|cloud-llm|foundation-models|codex-headless-oauth)",
+	)
+	postprocessConfig := fs.String(
+		"postprocess-config",
+		"",
+		"postprocess config file path (defaults to OCRPOC_POSTPROCESS_CONFIG)",
+	)
 	workers := fs.Int("workers", 1, "number of concurrent PDF jobs")
 	maxWorkers := fs.Int("max-workers", 0, "optional manual worker override")
 	resume := fs.Bool("resume", true, "resume from batch_state.json when present")
@@ -164,8 +191,9 @@ func batchCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(
 		stderr,
-		"batch config: provider=%s workers=%d max-workers=%d mode=%s local-only=%t\n",
+		"batch config: provider=%s postprocess=%s workers=%d max-workers=%d mode=%s local-only=%t\n",
 		p.Name(),
+		displayPostprocessProvider(*postprocessProvider),
 		*workers,
 		resolvedMaxWorkers,
 		mode,
@@ -175,17 +203,19 @@ func batchCommand(args []string, stdout, stderr io.Writer) int {
 	defer renderer.Finish()
 
 	report, err := batch.Run(context.Background(), p, batch.Options{
-		InputPath:      *input,
-		OutputRoot:     *out,
-		Profile:        *profile,
-		LocalOnly:      *localOnly,
-		MaxWorkers:     resolvedMaxWorkers,
-		MaxWorkersMode: mode,
-		Workers:        *workers,
-		Recursive:      *recursive,
-		Resume:         *resume,
-		RetryFailed:    *retryFailed,
-		OnProgress:     renderer.Render,
+		InputPath:             *input,
+		OutputRoot:            *out,
+		Profile:               *profile,
+		LocalOnly:             *localOnly,
+		MaxWorkers:            resolvedMaxWorkers,
+		MaxWorkersMode:        mode,
+		PostprocessProvider:   *postprocessProvider,
+		PostprocessConfigPath: *postprocessConfig,
+		Workers:               *workers,
+		Recursive:             *recursive,
+		Resume:                *resume,
+		RetryFailed:           *retryFailed,
+		OnProgress:            renderer.Render,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "batch failed: %v\n", err)
@@ -199,6 +229,14 @@ func batchCommand(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func displayPostprocessProvider(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "auto"
+	}
+	return value
 }
 
 func evalCommand(args []string, stdout, stderr io.Writer) int {

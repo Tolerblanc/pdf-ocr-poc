@@ -10,23 +10,27 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/postprocess"
 	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/provider"
 )
 
 type Options struct {
-	InputPDF       string
-	OutputDir      string
-	Profile        string
-	LocalOnly      bool
-	MaxWorkers     int
-	MaxWorkersMode string
-	OnProgress     provider.ProgressHandler
+	InputPDF              string
+	OutputDir             string
+	Profile               string
+	LocalOnly             bool
+	MaxWorkers            int
+	MaxWorkersMode        string
+	PostprocessProvider   string
+	PostprocessConfigPath string
+	OnProgress            provider.ProgressHandler
 }
 
 type Output struct {
 	RunReportPath       string
 	LocalOnlyReportPath string
 	Result              provider.Result
+	Postprocess         postprocess.Output
 }
 
 func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, error) {
@@ -49,6 +53,14 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 		return Output{}, err
 	}
 
+	resolvedPostprocess, err := postprocess.ResolveConfig(opts.PostprocessProvider, opts.PostprocessConfigPath)
+	if err != nil {
+		return Output{}, err
+	}
+	if err := validatePostprocessExecution(resolvedPostprocess, opts.LocalOnly); err != nil {
+		return Output{}, err
+	}
+
 	start := time.Now()
 	result, err := p.Run(ctx, provider.Request{
 		InputPDF:      opts.InputPDF,
@@ -63,6 +75,47 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 	if err != nil {
 		return Output{}, err
 	}
+
+	postprocessProvider, err := postprocess.New(resolvedPostprocess.Config.Provider)
+	if err != nil {
+		return Output{}, err
+	}
+	postprocessOutput, err := postprocess.Execute(ctx, postprocessProvider, postprocess.Request{
+		InputPDF:    opts.InputPDF,
+		OutputDir:   opts.OutputDir,
+		OCRProvider: p.Name(),
+		OCRResult:   result,
+		Config:      resolvedPostprocess.Config,
+		LocalOnly:   opts.LocalOnly,
+		OnProgress:  opts.OnProgress,
+	})
+	if err != nil {
+		return Output{}, err
+	}
+	if postprocessOutput.OutputMode == postprocess.OutputModePrimaryArtifacts {
+		if supportsPrimaryArtifactRegeneration(result) {
+			result, err = rebuildPrimaryArtifacts(ctx, p, result, opts, postprocessOutput.CorrectedPagesJSON)
+			if err != nil {
+				return Output{}, err
+			}
+		} else {
+			postprocessOutput.OutputMode = postprocess.OutputModeSidecarOnly
+			postprocessOutput.Warnings = mergeWarnings(
+				postprocessOutput.Warnings,
+				[]string{"primary_artifacts_not_supported_by_provider"},
+			)
+			postprocessOutput.Document.Postprocess.OutputMode = postprocess.OutputModeSidecarOnly
+			postprocessOutput.Document.Postprocess.Warnings = postprocessOutput.Warnings
+			if err := rewriteCorrectedPagesDocument(postprocessOutput.CorrectedPagesJSON, postprocessOutput.Document); err != nil {
+				return Output{}, err
+			}
+		}
+	}
+
+	stageTimings := mergeStageTimings(result.StageTimings, postprocessOutput.StageTimings)
+	warnings := mergeWarnings(result.Warnings, postprocessOutput.Warnings)
+	result.StageTimings = stageTimings
+	result.Warnings = warnings
 	elapsed := time.Since(start).Seconds()
 	pages := countPages(result.PagesJSON)
 	pagesPerMinute := 0.0
@@ -72,21 +125,31 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 
 	runReportPath := filepath.Join(opts.OutputDir, "run_report.json")
 	runReport := map[string]any{
-		"engine":                p.Name(),
-		"input_pdf":             opts.InputPDF,
-		"profile":               opts.Profile,
-		"effective_max_workers": opts.MaxWorkers,
-		"max_workers_mode":      opts.MaxWorkersMode,
-		"local_only":            opts.LocalOnly,
-		"elapsed_seconds":       elapsed,
-		"pages":                 pages,
-		"pages_per_minute":      pagesPerMinute,
-		"searchable_pdf":        result.SearchablePDF,
-		"pages_json":            result.PagesJSON,
-		"text_path":             result.TextPath,
-		"markdown_path":         result.MarkdownPath,
-		"stage_timings":         result.StageTimings,
-		"warnings":              result.Warnings,
+		"engine":                    p.Name(),
+		"input_pdf":                 opts.InputPDF,
+		"profile":                   opts.Profile,
+		"effective_max_workers":     opts.MaxWorkers,
+		"max_workers_mode":          opts.MaxWorkersMode,
+		"local_only":                opts.LocalOnly,
+		"elapsed_seconds":           elapsed,
+		"pages":                     pages,
+		"pages_per_minute":          pagesPerMinute,
+		"searchable_pdf":            result.SearchablePDF,
+		"pages_json":                result.PagesJSON,
+		"text_path":                 result.TextPath,
+		"markdown_path":             result.MarkdownPath,
+		"stage_timings":             stageTimings,
+		"warnings":                  warnings,
+		"postprocess_provider":      postprocessProvider.Name(),
+		"postprocess_config_path":   resolvedPostprocess.Path,
+		"postprocess_profile":       resolvedPostprocess.Profile,
+		"postprocess_applied":       postprocessOutput.Applied,
+		"postprocess_changed_pages": postprocessOutput.ChangedPages,
+		"corrected_pages_json":      postprocessOutput.CorrectedPagesJSON,
+		"corrected_text_path":       postprocessOutput.CorrectedTextPath,
+		"corrected_markdown_path":   postprocessOutput.CorrectedMarkdownPath,
+		"postprocess_output_mode":   postprocessOutput.OutputMode,
+		"postprocess_warnings":      postprocessOutput.Warnings,
 	}
 	if err := writeJSON(runReportPath, runReport); err != nil {
 		return Output{}, err
@@ -127,7 +190,60 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 		RunReportPath:       runReportPath,
 		LocalOnlyReportPath: localOnlyReportPath,
 		Result:              result,
+		Postprocess:         postprocessOutput,
 	}, nil
+}
+
+func validatePostprocessExecution(resolved postprocess.ResolvedConfig, localOnly bool) error {
+	if resolved.AllowRemote != nil && !*resolved.AllowRemote && postprocessProviderRequiresRemote(resolved.Config.Provider) {
+		return fmt.Errorf("postprocess config forbids remote providers: %s", resolved.Config.Provider)
+	}
+	if localOnly && postprocessProviderRequiresRemote(resolved.Config.Provider) {
+		return fmt.Errorf("postprocess provider %s is not allowed when local-only mode is enabled", resolved.Config.Provider)
+	}
+	return nil
+}
+
+func postprocessProviderRequiresRemote(name string) bool {
+	return name == postprocess.ProviderCloudLLM || name == postprocess.ProviderCodexHeadlessOAuth
+}
+
+func rebuildPrimaryArtifacts(
+	ctx context.Context,
+	p provider.Provider,
+	current provider.Result,
+	opts Options,
+	correctedPagesJSON string,
+) (provider.Result, error) {
+	if strings.TrimSpace(correctedPagesJSON) == "" {
+		return provider.Result{}, errors.New("primary artifact regeneration requires corrected_pages.json")
+	}
+
+	rebuilt, err := p.Run(ctx, provider.Request{
+		InputPDF:           opts.InputPDF,
+		OutputDir:          opts.OutputDir,
+		Profile:            opts.Profile,
+		LocalOnly:          opts.LocalOnly,
+		MaxWorkers:         opts.MaxWorkers,
+		WorkersMode:        opts.MaxWorkersMode,
+		CorrectedPagesJSON: correctedPagesJSON,
+		RequestSource:      "ocrpoc-go/postprocess-primary-artifacts",
+		OnProgress:         opts.OnProgress,
+	})
+	if err != nil {
+		return provider.Result{}, err
+	}
+	if rebuilt.ArtifactSource != provider.ArtifactSourceCorrectedPages {
+		return provider.Result{}, fmt.Errorf(
+			"provider %s did not confirm corrected_pages artifact regeneration",
+			p.Name(),
+		)
+	}
+	return mergeProviderResults(current, rebuilt), nil
+}
+
+func supportsPrimaryArtifactRegeneration(result provider.Result) bool {
+	return result.Capabilities != nil && result.Capabilities.CorrectedArtifactRebuild
 }
 
 func countPages(pagesJSONPath string) int {
@@ -155,4 +271,87 @@ func writeJSON(path string, payload any) error {
 	}
 	body = append(body, '\n')
 	return os.WriteFile(path, body, 0o644)
+}
+
+func rewriteCorrectedPagesDocument(path string, doc postprocess.Document) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	return writeJSON(path, doc)
+}
+
+func mergeStageTimings(groups ...map[string]float64) map[string]float64 {
+	merged := map[string]float64{}
+	for _, group := range groups {
+		for key, value := range group {
+			merged[key] = value
+		}
+	}
+	return merged
+}
+
+func mergeWarnings(groups ...[]string) []string {
+	seen := map[string]struct{}{}
+	merged := []string{}
+	for _, group := range groups {
+		for _, warning := range group {
+			warning = strings.TrimSpace(warning)
+			if warning == "" {
+				continue
+			}
+			if _, ok := seen[warning]; ok {
+				continue
+			}
+			seen[warning] = struct{}{}
+			merged = append(merged, warning)
+		}
+	}
+	return merged
+}
+
+func mergeProviderResults(base, overlay provider.Result) provider.Result {
+	merged := overlay
+	if merged.SearchablePDF == "" {
+		merged.SearchablePDF = base.SearchablePDF
+	}
+	if merged.PagesJSON == "" {
+		merged.PagesJSON = base.PagesJSON
+	}
+	if merged.TextPath == "" {
+		merged.TextPath = base.TextPath
+	}
+	if merged.MarkdownPath == "" {
+		merged.MarkdownPath = base.MarkdownPath
+	}
+	merged.StageTimings = sumStageTimings(base.StageTimings, overlay.StageTimings)
+	merged.Warnings = mergeWarnings(base.Warnings, overlay.Warnings)
+	merged.MonitorSamples = base.MonitorSamples + overlay.MonitorSamples
+	merged.MonitorDurationSeconds = base.MonitorDurationSeconds + overlay.MonitorDurationSeconds
+	merged.RemoteConnectionViolations = mergeWarnings(base.RemoteConnectionViolations, overlay.RemoteConnectionViolations)
+	if overlay.LocalOnlySelfcheckSet {
+		merged.LocalOnlySelfcheckSet = true
+		merged.LocalOnlySelfcheckOK = overlay.LocalOnlySelfcheckOK
+		if base.LocalOnlySelfcheckSet {
+			merged.LocalOnlySelfcheckOK = base.LocalOnlySelfcheckOK && overlay.LocalOnlySelfcheckOK
+		}
+		merged.LocalOnlySelfcheckMessage = overlay.LocalOnlySelfcheckMessage
+		if strings.TrimSpace(merged.LocalOnlySelfcheckMessage) == "" {
+			merged.LocalOnlySelfcheckMessage = base.LocalOnlySelfcheckMessage
+		}
+	} else {
+		merged.LocalOnlySelfcheckSet = base.LocalOnlySelfcheckSet
+		merged.LocalOnlySelfcheckOK = base.LocalOnlySelfcheckOK
+		merged.LocalOnlySelfcheckMessage = base.LocalOnlySelfcheckMessage
+	}
+	return merged
+}
+
+func sumStageTimings(groups ...map[string]float64) map[string]float64 {
+	merged := map[string]float64{}
+	for _, group := range groups {
+		for key, value := range group {
+			merged[key] += value
+		}
+	}
+	return merged
 }

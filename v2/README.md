@@ -100,6 +100,38 @@ make validate-searchable \
 
 The validator checks page count, non-blank extraction coverage, and per-page line-match consistency.
 
+## Postprocess
+
+- `ocrpoc-go run` and `ocrpoc-go batch` accept `--postprocess-provider` and `--postprocess-config`.
+- `--postprocess-config` falls back to `OCRPOC_POSTPROCESS_CONFIG` when omitted.
+- The config file can select a named profile, resolve shared credentials via `auth_ref`, and override runtime settings like `output_mode`.
+- `output_mode=primary_artifacts` keeps `corrected_pages.json` sidecars and also regenerates `pages.json`, `document.txt`, `document.md`, and `searchable.pdf` from the corrected result.
+
+Example config:
+
+```json
+{
+  "version": "v1alpha1",
+  "credentials": {
+    "openai": {
+      "kind": "oauth_store_file",
+      "file": "~/.local/share/opencode/auth.json",
+      "provider_id": "openai"
+    }
+  },
+  "providers": {
+    "default": {
+      "provider": "codex-headless-oauth",
+      "auth_ref": "openai",
+      "output_mode": "primary_artifacts"
+    }
+  },
+  "runtime": {
+    "profile": "default"
+  }
+}
+```
+
 ## Provider mode
 
 - `--provider mock`: built-in stub provider for integration and state-flow testing.

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/postprocess"
 	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/provider"
 	runpkg "github.com/Tolerblanc/pdf-ocr-poc/v2/internal/run"
 )
@@ -27,17 +28,19 @@ const (
 )
 
 type Options struct {
-	InputPath      string
-	OutputRoot     string
-	Profile        string
-	LocalOnly      bool
-	MaxWorkers     int
-	MaxWorkersMode string
-	Workers        int
-	Recursive      bool
-	Resume         bool
-	RetryFailed    int
-	OnProgress     func(ProgressSnapshot)
+	InputPath             string
+	OutputRoot            string
+	Profile               string
+	LocalOnly             bool
+	MaxWorkers            int
+	MaxWorkersMode        string
+	PostprocessProvider   string
+	PostprocessConfigPath string
+	Workers               int
+	Recursive             bool
+	Resume                bool
+	RetryFailed           int
+	OnProgress            func(ProgressSnapshot)
 }
 
 type ProgressPhase string
@@ -130,9 +133,14 @@ func Run(ctx context.Context, p provider.Provider, opts Options) (Report, error)
 	if err != nil {
 		return Report{}, err
 	}
+	resolvedPostprocess, err := postprocess.ResolveConfig(opts.PostprocessProvider, opts.PostprocessConfigPath)
+	if err != nil {
+		return Report{}, err
+	}
 
 	start := time.Now()
 	totalAttempts := opts.RetryFailed + 1
+	postprocessProvider := strings.TrimSpace(opts.PostprocessProvider)
 	effectiveWorkers := effectiveWorkersForJobs(opts.Workers, state.Jobs)
 	emitProgress(opts, buildProgressSnapshot(
 		state,
@@ -155,6 +163,7 @@ func Run(ctx context.Context, p provider.Provider, opts Options) (Report, error)
 		runJobs(
 			ctx,
 			p,
+			postprocessProvider,
 			opts,
 			statePath,
 			state,
@@ -190,24 +199,27 @@ func Run(ctx context.Context, p provider.Provider, opts Options) (Report, error)
 		maxWorkersOverride = opts.MaxWorkers
 	}
 	if err := writeJSON(reportPath, map[string]any{
-		"input_path":           opts.InputPath,
-		"output_root":          opts.OutputRoot,
-		"provider":             p.Name(),
-		"profile":              opts.Profile,
-		"local_only":           opts.LocalOnly,
-		"workers_requested":    opts.Workers,
-		"effective_workers":    effectiveWorkers,
-		"retry_failed":         opts.RetryFailed,
-		"max_workers":          opts.MaxWorkers,
-		"workers_mode":         opts.MaxWorkersMode,
-		"max_workers_override": maxWorkersOverride,
-		"state_path":           statePath,
-		"generated_at":         time.Now().UTC().Format(time.RFC3339),
-		"total":                report.Total,
-		"succeeded":            report.Succeeded,
-		"failed":               report.Failed,
-		"skipped":              report.Skipped,
-		"jobs":                 state.Jobs,
+		"input_path":              opts.InputPath,
+		"output_root":             opts.OutputRoot,
+		"provider":                p.Name(),
+		"postprocess_provider":    resolvedPostprocess.Config.Provider,
+		"postprocess_profile":     resolvedPostprocess.Profile,
+		"postprocess_config_path": resolvedPostprocess.Path,
+		"profile":                 opts.Profile,
+		"local_only":              opts.LocalOnly,
+		"workers_requested":       opts.Workers,
+		"effective_workers":       effectiveWorkers,
+		"retry_failed":            opts.RetryFailed,
+		"max_workers":             opts.MaxWorkers,
+		"workers_mode":            opts.MaxWorkersMode,
+		"max_workers_override":    maxWorkersOverride,
+		"state_path":              statePath,
+		"generated_at":            time.Now().UTC().Format(time.RFC3339),
+		"total":                   report.Total,
+		"succeeded":               report.Succeeded,
+		"failed":                  report.Failed,
+		"skipped":                 report.Skipped,
+		"jobs":                    state.Jobs,
 	}); err != nil {
 		return Report{}, err
 	}
@@ -218,6 +230,7 @@ func Run(ctx context.Context, p provider.Provider, opts Options) (Report, error)
 func runJobs(
 	ctx context.Context,
 	p provider.Provider,
+	postprocessProvider string,
 	opts Options,
 	statePath string,
 	state *State,
@@ -273,12 +286,14 @@ func runJobs(
 				}
 
 				execOutput, err := runpkg.Execute(ctx, p, runpkg.Options{
-					InputPDF:       job.InputPDF,
-					OutputDir:      job.RunDir,
-					Profile:        opts.Profile,
-					LocalOnly:      opts.LocalOnly,
-					MaxWorkers:     opts.MaxWorkers,
-					MaxWorkersMode: opts.MaxWorkersMode,
+					InputPDF:              job.InputPDF,
+					OutputDir:             job.RunDir,
+					Profile:               opts.Profile,
+					LocalOnly:             opts.LocalOnly,
+					MaxWorkers:            opts.MaxWorkers,
+					MaxWorkersMode:        opts.MaxWorkersMode,
+					PostprocessProvider:   postprocessProvider,
+					PostprocessConfigPath: opts.PostprocessConfigPath,
 					OnProgress: func(event provider.ProgressEvent) {
 						mu.Lock()
 						snapshot := buildProgressSnapshot(

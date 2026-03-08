@@ -1,0 +1,282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Tolerblanc/pdf-ocr-poc/v2/corrected-pages.schema.json",
+  "title": "ocrpoc-go corrected pages canonical document",
+  "type": "object",
+  "required": [
+    "version",
+    "kind",
+    "engine",
+    "source_pdf",
+    "postprocess",
+    "pages"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "v1alpha1"
+    },
+    "kind": {
+      "type": "string",
+      "const": "corrected_pages"
+    },
+    "engine": {
+      "type": "string"
+    },
+    "source_pdf": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_artifacts": {
+      "$ref": "#/definitions/source_artifacts"
+    },
+    "postprocess": {
+      "$ref": "#/definitions/postprocess"
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/page"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "bbox": {
+      "type": "object",
+      "required": [
+        "x0",
+        "y0",
+        "x1",
+        "y1"
+      ],
+      "properties": {
+        "x0": { "type": "number" },
+        "y0": { "type": "number" },
+        "x1": { "type": "number" },
+        "y1": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "source_artifacts": {
+      "type": "object",
+      "properties": {
+        "pages_json": { "type": "string" },
+        "text_path": { "type": "string" },
+        "markdown_path": { "type": "string" },
+        "searchable_pdf": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "postprocess": {
+      "type": "object",
+      "required": [
+        "provider",
+        "applied",
+        "output_mode"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "none",
+            "local-lm",
+            "cloud-llm",
+            "foundation-models",
+            "codex-headless-oauth"
+          ]
+        },
+        "applied": {
+          "type": "boolean"
+        },
+        "output_mode": {
+          "type": "string",
+          "enum": [
+            "sidecar_only",
+            "primary_artifacts"
+          ]
+        },
+        "credential_kind": {
+          "type": "string",
+          "enum": [
+            "none",
+            "env_api_key",
+            "env_oauth_access_token",
+            "oauth_store_file",
+            "local_runtime",
+            "unknown"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "stage_timings": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        },
+        "provider_metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "page_correction": {
+      "type": "object",
+      "required": [
+        "status",
+        "changed_blocks",
+        "total_blocks"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "unchanged",
+            "corrected",
+            "flagged",
+            "rejected"
+          ]
+        },
+        "changed_blocks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_blocks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "block_correction": {
+      "type": "object",
+      "required": [
+        "status",
+        "edited",
+        "reasons"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "unchanged",
+            "corrected",
+            "flagged",
+            "rejected"
+          ]
+        },
+        "edited": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "protected": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "block": {
+      "type": "object",
+      "required": [
+        "block_id",
+        "text",
+        "source_text",
+        "bbox",
+        "block_type",
+        "confidence",
+        "reading_order",
+        "correction"
+      ],
+      "properties": {
+        "block_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "source_text": {
+          "type": "string"
+        },
+        "bbox": {
+          "$ref": "#/definitions/bbox"
+        },
+        "block_type": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "reading_order": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "correction": {
+          "$ref": "#/definitions/block_correction"
+        }
+      },
+      "additionalProperties": false
+    },
+    "page": {
+      "type": "object",
+      "required": [
+        "page",
+        "source_text",
+        "text",
+        "blocks",
+        "correction"
+      ],
+      "properties": {
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "is_blank": {
+          "type": "boolean"
+        },
+        "source_text": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/block"
+          }
+        },
+        "correction": {
+          "$ref": "#/definitions/page_correction"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

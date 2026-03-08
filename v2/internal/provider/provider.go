@@ -10,16 +10,17 @@ import (
 )
 
 type Request struct {
-	InputPDF      string          `json:"input_pdf"`
-	OutputDir     string          `json:"output_dir"`
-	Profile       string          `json:"profile"`
-	LocalOnly     bool            `json:"local_only"`
-	MaxWorkers    int             `json:"max_workers"`
-	WorkersMode   string          `json:"workers_mode"`
-	ShardIndex    int             `json:"shard_index,omitempty"`
-	ShardTotal    int             `json:"shard_total,omitempty"`
-	RequestSource string          `json:"request_source,omitempty"`
-	OnProgress    ProgressHandler `json:"-"`
+	InputPDF           string          `json:"input_pdf"`
+	OutputDir          string          `json:"output_dir"`
+	Profile            string          `json:"profile"`
+	LocalOnly          bool            `json:"local_only"`
+	MaxWorkers         int             `json:"max_workers"`
+	WorkersMode        string          `json:"workers_mode"`
+	CorrectedPagesJSON string          `json:"corrected_pages_json,omitempty"`
+	ShardIndex         int             `json:"shard_index,omitempty"`
+	ShardTotal         int             `json:"shard_total,omitempty"`
+	RequestSource      string          `json:"request_source,omitempty"`
+	OnProgress         ProgressHandler `json:"-"`
 }
 
 type ProgressHandler func(ProgressEvent)
@@ -33,12 +34,14 @@ type ProgressEvent struct {
 }
 
 type Result struct {
-	SearchablePDF string             `json:"searchable_pdf"`
-	PagesJSON     string             `json:"pages_json"`
-	TextPath      string             `json:"text_path"`
-	MarkdownPath  string             `json:"markdown_path"`
-	StageTimings  map[string]float64 `json:"stage_timings,omitempty"`
-	Warnings      []string           `json:"warnings,omitempty"`
+	SearchablePDF  string             `json:"searchable_pdf"`
+	PagesJSON      string             `json:"pages_json"`
+	TextPath       string             `json:"text_path"`
+	MarkdownPath   string             `json:"markdown_path"`
+	ArtifactSource string             `json:"artifact_source,omitempty"`
+	Capabilities   *Capabilities      `json:"capabilities,omitempty"`
+	StageTimings   map[string]float64 `json:"stage_timings,omitempty"`
+	Warnings       []string           `json:"warnings,omitempty"`
 
 	MonitorSamples             int      `json:"-"`
 	MonitorDurationSeconds     float64  `json:"-"`
@@ -46,6 +49,15 @@ type Result struct {
 	LocalOnlySelfcheckSet      bool     `json:"-"`
 	LocalOnlySelfcheckOK       bool     `json:"-"`
 	LocalOnlySelfcheckMessage  string   `json:"-"`
+}
+
+const (
+	ArtifactSourceOCR            = "ocr"
+	ArtifactSourceCorrectedPages = "corrected_pages"
+)
+
+type Capabilities struct {
+	CorrectedArtifactRebuild bool `json:"corrected_artifact_rebuild,omitempty"`
 }
 
 type Provider interface {

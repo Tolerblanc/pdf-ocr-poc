@@ -11,6 +11,7 @@ struct Request: Decodable {
     let local_only: Bool
     let max_workers: Int
     let workers_mode: String
+    let corrected_pages_json: String?
     let shard_index: Int?
     let shard_total: Int?
     let request_source: String?
@@ -21,8 +22,14 @@ struct Result: Encodable {
     let pages_json: String
     let text_path: String
     let markdown_path: String
+    let artifact_source: String
+    let capabilities: Capabilities?
     let stage_timings: [String: Double]
     let warnings: [String]
+}
+
+struct Capabilities: Encodable {
+    let corrected_artifact_rebuild: Bool
 }
 
 struct ProgressEvent: Encodable {
@@ -33,14 +40,14 @@ struct ProgressEvent: Encodable {
     let total_pages: Int?
 }
 
-struct BBox: Encodable {
+struct BBox: Codable {
     let x0: Double
     let y0: Double
     let x1: Double
     let y1: Double
 }
 
-struct OCRBlock: Encodable {
+struct OCRBlock: Codable {
     let text: String
     let bbox: BBox
     let blockType: String
@@ -56,7 +63,7 @@ struct OCRBlock: Encodable {
     }
 }
 
-struct OCRPage: Encodable {
+struct OCRPage: Codable {
     let page: Int
     let width: Int
     let height: Int
@@ -72,9 +79,28 @@ struct OCRPage: Encodable {
         case text
         case blocks
     }
+
+    init(page: Int, width: Int, height: Int, isBlank: Bool, text: String, blocks: [OCRBlock]) {
+        self.page = page
+        self.width = width
+        self.height = height
+        self.isBlank = isBlank
+        self.text = text
+        self.blocks = blocks
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.page = try container.decode(Int.self, forKey: .page)
+        self.width = try container.decodeIfPresent(Int.self, forKey: .width) ?? 0
+        self.height = try container.decodeIfPresent(Int.self, forKey: .height) ?? 0
+        self.isBlank = try container.decodeIfPresent(Bool.self, forKey: .isBlank) ?? false
+        self.text = try container.decode(String.self, forKey: .text)
+        self.blocks = try container.decodeIfPresent([OCRBlock].self, forKey: .blocks) ?? []
+    }
 }
 
-struct OCRDocument: Encodable {
+struct OCRDocument: Codable {
     let engine: String
     let sourcePDF: String
     let pages: [OCRPage]
@@ -1027,6 +1053,106 @@ func buildSearchablePDF(inputPDF: String, outputPDF: String, artifacts: [PageArt
 
 }
 
+func loadCorrectedOCRDocument(path: String) throws -> OCRDocument {
+    let data = try Data(contentsOf: URL(fileURLWithPath: path))
+    return try JSONDecoder().decode(OCRDocument.self, from: data)
+}
+
+func buildArtifactsFromCorrectedDocument(inputPDF: String, document: OCRDocument) -> ([PageArtifact], [String]) {
+    let pdfDocument = PDFDocument(url: URL(fileURLWithPath: inputPDF))
+    let sortedPages = document.pages.sorted(by: { $0.page < $1.page })
+    var warnings: [String] = []
+    var artifacts: [PageArtifact] = []
+    for (offset, page) in sortedPages.enumerated() {
+        let pageIndex = max(0, page.page - 1)
+        var pageBounds = CGRect(x: 0, y: 0, width: max(1, page.width), height: max(1, page.height))
+        if let pdfPage = pdfDocument?.page(at: pageIndex) {
+            let bounds = pdfPage.bounds(for: .mediaBox)
+            if !bounds.isEmpty {
+                pageBounds = bounds
+            }
+        } else {
+            warnings.append("corrected_page_missing_source_bounds_\(page.page)")
+            if pageBounds.width <= 1 || pageBounds.height <= 1 {
+                pageBounds = CGRect(x: 0, y: 0, width: 612, height: 792)
+            }
+        }
+
+        artifacts.append(PageArtifact(
+            index: max(pageIndex, offset),
+            pageBounds: pageBounds,
+            imageWidth: max(max(page.width, Int(pageBounds.width)), 1),
+            imageHeight: max(max(page.height, Int(pageBounds.height)), 1),
+            ocrPage: page
+        ))
+    }
+    return (artifacts, warnings)
+}
+
+func writeOCRArtifacts(
+    inputPDF: String,
+    outputDir: String,
+    pages: [OCRPage],
+    ocrDocument: OCRDocument,
+    artifacts: [PageArtifact],
+    artifactSource: String,
+    warnings initialWarnings: [String],
+    baseStageTimings: [String: Double],
+    totalStart: Date
+) throws -> Result {
+    let pagesJSON = (outputDir as NSString).appendingPathComponent("pages.json")
+    let textPath = (outputDir as NSString).appendingPathComponent("document.txt")
+    let markdownPath = (outputDir as NSString).appendingPathComponent("document.md")
+    let searchablePDF = (outputDir as NSString).appendingPathComponent("searchable.pdf")
+
+    let pageCount = pages.count
+    let serializeStart = Date()
+    emitProgress(
+        ProgressEvent(
+            phase: "stage_started",
+            stage: "serialization",
+            current_page: nil,
+            completed_pages: nil,
+            total_pages: pageCount
+        )
+    )
+    try writeDocument(ocrDocument, to: pagesJSON)
+    try writeFile(path: textPath, content: Data((renderText(pages: pages) + "\n").utf8))
+    try writeFile(path: markdownPath, content: Data((renderMarkdown(pages: pages).trimmingCharacters(in: .whitespacesAndNewlines) + "\n").utf8))
+    let serializeSeconds = Date().timeIntervalSince(serializeStart)
+
+    let searchableStart = Date()
+    emitProgress(
+        ProgressEvent(
+            phase: "stage_started",
+            stage: "searchable_pdf",
+            current_page: nil,
+            completed_pages: nil,
+            total_pages: pageCount
+        )
+    )
+    var warnings = initialWarnings
+    let (_, searchableWarnings) = buildSearchablePDF(inputPDF: inputPDF, outputPDF: searchablePDF, artifacts: artifacts)
+    warnings.append(contentsOf: searchableWarnings)
+    let searchableSeconds = Date().timeIntervalSince(searchableStart)
+
+    var stageTimings = baseStageTimings
+    stageTimings["serialization_seconds"] = serializeSeconds
+    stageTimings["searchable_pdf_seconds"] = searchableSeconds
+    stageTimings["provider_total_seconds"] = Date().timeIntervalSince(totalStart)
+
+    return Result(
+        searchable_pdf: searchablePDF,
+        pages_json: pagesJSON,
+        text_path: textPath,
+        markdown_path: markdownPath,
+        artifact_source: artifactSource,
+        capabilities: Capabilities(corrected_artifact_rebuild: true),
+        stage_timings: stageTimings,
+        warnings: warnings
+    )
+}
+
 func writeDocument(_ document: OCRDocument, to path: String) throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -1118,6 +1244,38 @@ func run() throws {
 
     try FileManager.default.createDirectory(atPath: request.output_dir, withIntermediateDirectories: true)
 
+    if let correctedPagesPath = request.corrected_pages_json,
+       !correctedPagesPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        let correctedDocument = try loadCorrectedOCRDocument(path: correctedPagesPath)
+        let correctedPages = correctedDocument.pages.sorted(by: { $0.page < $1.page })
+        let (artifacts, warnings) = buildArtifactsFromCorrectedDocument(
+            inputPDF: request.input_pdf,
+            document: OCRDocument(
+                engine: correctedDocument.engine,
+                sourcePDF: correctedDocument.sourcePDF,
+                pages: correctedPages
+            )
+        )
+        let result = try writeOCRArtifacts(
+            inputPDF: request.input_pdf,
+            outputDir: request.output_dir,
+            pages: correctedPages,
+            ocrDocument: OCRDocument(
+                engine: correctedDocument.engine,
+                sourcePDF: correctedDocument.sourcePDF,
+                pages: correctedPages
+            ),
+            artifacts: artifacts,
+            artifactSource: "corrected_pages",
+            warnings: warnings,
+            baseStageTimings: [:],
+            totalStart: totalStart
+        )
+        let output = try JSONEncoder().encode(result)
+        FileHandle.standardOutput.write(output)
+        return
+    }
+
     guard let document = PDFDocument(url: URL(fileURLWithPath: request.input_pdf)) else {
         throw ProviderError.failedToLoadPDF(request.input_pdf)
     }
@@ -1143,56 +1301,21 @@ func run() throws {
     let pages = artifacts.map { $0.ocrPage }
     let ocrDocument = OCRDocument(engine: "vision-swift", sourcePDF: request.input_pdf, pages: pages)
 
-    let pagesJSON = (request.output_dir as NSString).appendingPathComponent("pages.json")
-    let textPath = (request.output_dir as NSString).appendingPathComponent("document.txt")
-    let markdownPath = (request.output_dir as NSString).appendingPathComponent("document.md")
-    let searchablePDF = (request.output_dir as NSString).appendingPathComponent("searchable.pdf")
     let ocrStageProfilePath = (request.output_dir as NSString).appendingPathComponent("ocr_stage_profile.json")
     try writeOCRStageProfile(ocrStage.profile, to: ocrStageProfilePath)
 
-    let serializeStart = Date()
-    emitProgress(
-        ProgressEvent(
-            phase: "stage_started",
-            stage: "serialization",
-            current_page: nil,
-            completed_pages: nil,
-            total_pages: pageChunk.pageCount
-        )
-    )
-    try writeDocument(ocrDocument, to: pagesJSON)
-    try writeFile(path: textPath, content: Data((renderText(pages: pages) + "\n").utf8))
-    try writeFile(path: markdownPath, content: Data((renderMarkdown(pages: pages).trimmingCharacters(in: .whitespacesAndNewlines) + "\n").utf8))
-    let serializeSeconds = Date().timeIntervalSince(serializeStart)
-
-    let searchableStart = Date()
-    emitProgress(
-        ProgressEvent(
-            phase: "stage_started",
-            stage: "searchable_pdf",
-            current_page: nil,
-            completed_pages: nil,
-            total_pages: pageChunk.pageCount
-        )
-    )
-    let (_, searchableWarnings) = buildSearchablePDF(inputPDF: request.input_pdf, outputPDF: searchablePDF, artifacts: artifacts)
-    warnings.append(contentsOf: searchableWarnings)
-    let searchableSeconds = Date().timeIntervalSince(searchableStart)
-
-    let totalSeconds = Date().timeIntervalSince(totalStart)
     var stageTimings = ocrStageTimingMap(ocrStage.profile)
     stageTimings["vision_ocr_seconds"] = ocrSeconds
-    stageTimings["serialization_seconds"] = serializeSeconds
-    stageTimings["searchable_pdf_seconds"] = searchableSeconds
-    stageTimings["provider_total_seconds"] = totalSeconds
-
-    let result = Result(
-        searchable_pdf: searchablePDF,
-        pages_json: pagesJSON,
-        text_path: textPath,
-        markdown_path: markdownPath,
-        stage_timings: stageTimings,
-        warnings: warnings
+    let result = try writeOCRArtifacts(
+        inputPDF: request.input_pdf,
+        outputDir: request.output_dir,
+        pages: pages,
+        ocrDocument: ocrDocument,
+        artifacts: artifacts,
+        artifactSource: "ocr",
+        warnings: warnings,
+        baseStageTimings: stageTimings,
+        totalStart: totalStart
     )
 
     let output = try JSONEncoder().encode(result)
