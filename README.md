@@ -18,7 +18,7 @@ cd pdf-ocr-poc
 make quickstart
 ```
 
-`make quickstart` runs the doctor checks, builds the CLI, builds the bundled Vision provider when needed, verifies local-only prerequisites, and OCRs `__fixtures__/fixture.pdf` into `artifacts/v2-quickstart`.
+`make quickstart` runs the doctor checks, builds the CLI, builds the bundled Vision provider when needed, verifies OCR local-only prerequisites, and OCRs `__fixtures__/fixture.pdf` into `artifacts/v2-quickstart`.
 
 Useful overrides:
 
@@ -32,6 +32,12 @@ make quickstart \
 make quickstart \
   QUICKSTART_PROVIDER=mock \
   QUICKSTART_OUT=./artifacts/v2-mock-run
+
+# Keep OCR local-only, but allow remote postprocess
+make quickstart \
+  QUICKSTART_POSTPROCESS_PROVIDER=codex-headless-oauth \
+  QUICKSTART_POSTPROCESS_CONFIG=./postprocess.json \
+  QUICKSTART_POSTPROCESS_ALLOW_REMOTE=true
 ```
 
 If you prefer the manual flow from repository root:
@@ -43,7 +49,7 @@ make doctor
 # 2) Build CLI + Vision provider
 make build-all
 
-# 3) Optional: verify local-only monitor prerequisites
+# 3) Optional: verify OCR local-only monitor prerequisites
 ./v2/bin/ocrpoc-go selfcheck-local-only
 
 # 4) Run OCR with Apple Vision provider
@@ -60,12 +66,13 @@ Main outputs in `--out`:
 - `document.txt`
 - `document.md`
 - `run_report.json`
-- `local_only_report.json`
+- `local_only_report.json` (OCR provider only)
 
 ## Feature Overview
 
-- Local-only execution guard with process-tree network monitoring (`lsof` + `pgrep`)
+- OCR-provider local-only execution guard with process-tree network monitoring (`lsof` + `pgrep`)
 - Provider-based architecture (`vision-swift`, `exec`, `mock`)
+- Optional remote postprocess layer gated by `--postprocess-allow-remote`
 - Single-file OCR run and batch processing
 - Batch resume/retry workflow (`continue + retry failed at end`)
 - Evaluation command against gold pages JSON
@@ -109,6 +116,16 @@ make validate-searchable \
   SEARCHABLE=./artifacts/v2-vision-run/searchable.pdf \
   PAGES=./artifacts/v2-vision-run/pages.json \
   OUT=./artifacts/v2-vision-run/searchable_validation.json
+
+# Keep OCR local-only, but allow remote postprocess
+./v2/bin/ocrpoc-go run \
+  --input ./__fixtures__/fixture.pdf \
+  --out ./artifacts/v2-vision-postprocess-run \
+  --provider vision-swift \
+  --ocr-local-only=true \
+  --postprocess-provider codex-headless-oauth \
+  --postprocess-config ./postprocess.json \
+  --postprocess-allow-remote
 ```
 
 ## Swift/SDK Troubleshooting

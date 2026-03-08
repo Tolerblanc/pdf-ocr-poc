@@ -18,7 +18,7 @@ cd pdf-ocr-poc
 make quickstart
 ```
 
-`make quickstart`는 doctor 점검, CLI 빌드, 필요 시 번들 Vision provider 빌드, local-only 사전 점검, `__fixtures__/fixture.pdf` OCR 실행까지 한 번에 수행하고 결과를 `artifacts/v2-quickstart`에 남깁니다.
+`make quickstart`는 doctor 점검, CLI 빌드, 필요 시 번들 Vision provider 빌드, OCR local-only 사전 점검, `__fixtures__/fixture.pdf` OCR 실행까지 한 번에 수행하고 결과를 `artifacts/v2-quickstart`에 남깁니다.
 
 자주 쓰는 오버라이드 예시:
 
@@ -32,6 +32,12 @@ make quickstart \
 make quickstart \
   QUICKSTART_PROVIDER=mock \
   QUICKSTART_OUT=./artifacts/v2-mock-run
+
+# OCR은 local-only로 유지하고, 후보정만 원격 허용
+make quickstart \
+  QUICKSTART_POSTPROCESS_PROVIDER=codex-headless-oauth \
+  QUICKSTART_POSTPROCESS_CONFIG=./postprocess.json \
+  QUICKSTART_POSTPROCESS_ALLOW_REMOTE=true
 ```
 
 직접 단계별로 실행하려면 저장소 루트에서:
@@ -43,7 +49,7 @@ make doctor
 # 2) CLI + Vision provider 빌드
 make build-all
 
-# 3) 선택 사항: local-only 모니터링 사전 조건 점검
+# 3) 선택 사항: OCR local-only 모니터링 사전 조건 점검
 ./v2/bin/ocrpoc-go selfcheck-local-only
 
 # 4) Apple Vision provider로 OCR 실행
@@ -60,12 +66,13 @@ make build-all
 - `document.txt`
 - `document.md`
 - `run_report.json`
-- `local_only_report.json`
+- `local_only_report.json` (OCR provider 전용)
 
 ## 주요 기능
 
-- 프로세스 트리 네트워크 모니터링(`lsof` + `pgrep`) 기반 local-only 실행 가드
+- 프로세스 트리 네트워크 모니터링(`lsof` + `pgrep`) 기반 OCR provider local-only 실행 가드
 - provider 기반 구조(`vision-swift`, `exec`, `mock`)
+- `--postprocess-allow-remote`로만 여는 선택적 원격 후보정 레이어
 - 단일 PDF OCR 실행과 batch 처리 지원
 - batch resume/retry 워크플로우(`continue + retry failed at end`)
 - gold pages JSON 기준 평가 명령 지원
@@ -109,6 +116,16 @@ make validate-searchable \
   SEARCHABLE=./artifacts/v2-vision-run/searchable.pdf \
   PAGES=./artifacts/v2-vision-run/pages.json \
   OUT=./artifacts/v2-vision-run/searchable_validation.json
+
+# OCR은 local-only로 유지하고, 후보정만 원격 허용
+./v2/bin/ocrpoc-go run \
+  --input ./__fixtures__/fixture.pdf \
+  --out ./artifacts/v2-vision-postprocess-run \
+  --provider vision-swift \
+  --ocr-local-only=true \
+  --postprocess-provider codex-headless-oauth \
+  --postprocess-config ./postprocess.json \
+  --postprocess-allow-remote
 ```
 
 ## Swift/SDK 문제 해결

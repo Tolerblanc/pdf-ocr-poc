@@ -8,13 +8,14 @@ Go-based OCR orchestration CLI.
 make quickstart
 ```
 
-This is the shortest clone-to-first-run path. It runs doctor checks, builds `ocrpoc-go`, builds the bundled Vision provider when needed, and OCRs `__fixtures__/fixture.pdf` into `artifacts/v2-quickstart`.
+This is the shortest clone-to-first-run path. It runs doctor checks, builds `ocrpoc-go`, builds the bundled Vision provider when needed, verifies OCR local-only prerequisites, and OCRs `__fixtures__/fixture.pdf` into `artifacts/v2-quickstart`.
 
 Useful overrides:
 
 ```bash
 make quickstart QUICKSTART_INPUT=./my.pdf QUICKSTART_OUT=./artifacts/my-run
 make quickstart QUICKSTART_PROVIDER=mock QUICKSTART_OUT=./artifacts/v2-mock-run
+make quickstart QUICKSTART_POSTPROCESS_PROVIDER=codex-headless-oauth QUICKSTART_POSTPROCESS_CONFIG=./postprocess.json QUICKSTART_POSTPROCESS_ALLOW_REMOTE=true
 ```
 
 ## Build
@@ -118,9 +119,25 @@ The validator checks page count, non-blank extraction coverage, and per-page lin
 ## Postprocess
 
 - `ocrpoc-go run` and `ocrpoc-go batch` accept `--postprocess-provider` and `--postprocess-config`.
+- `--ocr-local-only` controls the OCR provider network guard only; it defaults to `true`.
+- `--postprocess-allow-remote` is required before remote postprocess providers are allowed.
 - `--postprocess-config` falls back to `OCRPOC_POSTPROCESS_CONFIG` when omitted.
 - The config file can select a named profile, resolve shared credentials via `auth_ref`, and override runtime settings like `output_mode`.
+- `runtime.allow_remote=false` in the config still blocks remote postprocess providers even if the CLI flag is enabled.
 - `output_mode=primary_artifacts` keeps `corrected_pages.json` sidecars and also regenerates `pages.json`, `document.txt`, `document.md`, and `searchable.pdf` from the corrected result.
+
+Example with local OCR plus remote postprocess:
+
+```bash
+./bin/ocrpoc-go run \
+  --input ../__fixtures__/fixture.pdf \
+  --out ../artifacts/v2-vision-postprocess-run \
+  --provider vision-swift \
+  --ocr-local-only=true \
+  --postprocess-provider codex-headless-oauth \
+  --postprocess-config ../postprocess.json \
+  --postprocess-allow-remote
+```
 
 Example config:
 
@@ -167,11 +184,11 @@ Vision provider notes:
 - Use `v2/providers/vision-swift/doctor.sh` to diagnose Swift toolchain issues.
 - `doctor.sh`/`build.sh` can auto-select a compatible fallback SDK; override with `SWIFT_SDK_PATH` if needed.
 
-## Local-only enforcement (v2)
+## OCR local-only enforcement (v2)
 
 - For `exec` providers, v2 monitors provider process tree network activity using `lsof` + `pgrep`.
-- `local_only_report.json` includes `selfcheck_ok`, `monitor_samples`, and `remote_connection_violations`.
-- If local-only mode is enabled and remote violations are detected, command exits non-zero.
+- `local_only_report.json` is scoped to the OCR provider and includes `selfcheck_ok`, `monitor_samples`, and `remote_connection_violations`.
+- If OCR local-only mode is enabled and remote violations are detected, command exits non-zero before postprocess runs.
 
 ## Outputs
 

@@ -60,16 +60,17 @@ quickstart: doctor-go build-go
 	PROFILE="$${QUICKSTART_PROFILE:-fast}"; \
 	PROVIDER="$${QUICKSTART_PROVIDER:-vision-swift}"; \
 	PROVIDER_BIN="$${QUICKSTART_PROVIDER_BIN:-}"; \
-	LOCAL_ONLY="$${QUICKSTART_LOCAL_ONLY:-true}"; \
+	OCR_LOCAL_ONLY="$${QUICKSTART_OCR_LOCAL_ONLY:-$${QUICKSTART_LOCAL_ONLY:-true}}"; \
 	POSTPROCESS_PROVIDER="$${QUICKSTART_POSTPROCESS_PROVIDER:-}"; \
 	POSTPROCESS_CONFIG="$${QUICKSTART_POSTPROCESS_CONFIG:-}"; \
+	POSTPROCESS_ALLOW_REMOTE="$${QUICKSTART_POSTPROCESS_ALLOW_REMOTE:-false}"; \
 	if [[ "$$PROVIDER" == "vision-swift" ]]; then \
 	  $(MAKE) doctor-swift build-vision; \
 	fi; \
-	if [[ "$$LOCAL_ONLY" == "true" ]]; then \
+	if [[ "$$OCR_LOCAL_ONLY" == "true" ]]; then \
 	  "$(V2_BIN)" selfcheck-local-only; \
 	fi; \
-	CMD=("$(V2_BIN)" run --input "$$INPUT" --out "$$OUT" --provider "$$PROVIDER" --profile "$$PROFILE" --local-only="$$LOCAL_ONLY"); \
+	CMD=("$(V2_BIN)" run --input "$$INPUT" --out "$$OUT" --provider "$$PROVIDER" --profile "$$PROFILE" --ocr-local-only="$$OCR_LOCAL_ONLY" --postprocess-allow-remote="$$POSTPROCESS_ALLOW_REMOTE"); \
 	if [[ -n "$$PROVIDER_BIN" ]]; then CMD+=(--provider-bin "$$PROVIDER_BIN"); fi; \
 	if [[ -n "$$POSTPROCESS_PROVIDER" ]]; then CMD+=(--postprocess-provider "$$POSTPROCESS_PROVIDER"); fi; \
 	if [[ -n "$$POSTPROCESS_CONFIG" ]]; then CMD+=(--postprocess-config "$$POSTPROCESS_CONFIG"); fi; \

@@ -68,7 +68,7 @@
     - `none` (후보정 비활성)
   - 보안/운영:
     - API 키는 환경 변수로만 주입 (`OCRPOC_POSTPROC_API_KEY` 등)
-    - `local_only=true`일 때는 `cloud-llm` 강제 차단
+    - OCR local-only와 후보정 remote 허용 정책을 분리하고, remote postprocess는 명시 opt-in으로만 허용
     - provider별 인증 방식(API key, OAuth token, local runtime)을 공통 설정 인터페이스로 추상화
   - 품질 가드:
     - 원문 대비 편집 거리 상한(과도한 재작성 방지)
