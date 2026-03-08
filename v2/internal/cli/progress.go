@@ -24,12 +24,11 @@ type batchProgressRenderer struct {
 }
 
 type runProgressRenderer struct {
-	mu        sync.Mutex
-	w         io.Writer
-	lastLen   int
-	inputPDF  string
-	start     time.Time
-	lastStage string
+	mu       sync.Mutex
+	w        io.Writer
+	lastLen  int
+	inputPDF string
+	start    time.Time
 }
 
 const maxWorkersNotAppliedWarning = "max_workers_not_applied_yet_in_swift_provider"
@@ -83,15 +82,12 @@ func (r *batchProgressRenderer) Render(snapshot batch.ProgressSnapshot) {
 	}
 
 	line := fmt.Sprintf(
-		"%s %6.2f%% %d/%d pdf | ok=%d fail=%d skip=%d run=%d | %.2f pdf/s | elapsed=%s eta=%s%s%s",
+		"%s %5.1f%% %d/%d pdf | %s | %.2f pdf/s | %s<%s%s%s",
 		renderProgressBar(snapshot.Completed, snapshot.Total, 24),
 		percent,
 		snapshot.Completed,
 		snapshot.Total,
-		snapshot.Succeeded,
-		snapshot.Failed,
-		snapshot.Skipped,
-		snapshot.Running,
+		formatBatchCounts(snapshot),
 		rate,
 		formatDuration(snapshot.Elapsed),
 		eta,
@@ -136,17 +132,17 @@ func (r *batchProgressRenderer) updateActivePDFs(snapshot batch.ProgressSnapshot
 
 func (r *batchProgressRenderer) describePDFActivity() string {
 	if len(r.activePDFs) == 1 {
-		return " | active=" + r.activePDFs[0]
+		return " | active " + r.activePDFs[0]
 	}
 	if len(r.activePDFs) == 2 {
-		return " | active=" + r.activePDFs[0] + "," + r.activePDFs[1]
+		return " | active " + r.activePDFs[0] + "," + r.activePDFs[1]
 	}
 	if len(r.activePDFs) > 2 {
 		preview := strings.Join(r.activePDFs[:2], ",")
-		return fmt.Sprintf(" | active=%d (%s,+%d)", len(r.activePDFs), preview, len(r.activePDFs)-2)
+		return fmt.Sprintf(" | active %d(%s,+%d)", len(r.activePDFs), preview, len(r.activePDFs)-2)
 	}
 	if r.lastPDF != "" {
-		return " | last=" + r.lastPDF
+		return " | last " + r.lastPDF
 	}
 	return ""
 }
@@ -159,14 +155,14 @@ func describePageProgress(snapshot batch.ProgressSnapshot) string {
 	stage := displayStageName(snapshot.CurrentStage)
 	if snapshot.CurrentStage == "vision_ocr" && snapshot.TotalPages > 0 {
 		if snapshot.CurrentPage > 0 {
-			return fmt.Sprintf(" | %s=%s %d/%d pages (p%d)", stage, pdfName, snapshot.CompletedPages, snapshot.TotalPages, snapshot.CurrentPage)
+			return fmt.Sprintf(" | %s %s %d/%d p%d", stage, pdfName, snapshot.CompletedPages, snapshot.TotalPages, snapshot.CurrentPage)
 		}
-		return fmt.Sprintf(" | %s=%s %d/%d pages", stage, pdfName, snapshot.CompletedPages, snapshot.TotalPages)
+		return fmt.Sprintf(" | %s %s %d/%d", stage, pdfName, snapshot.CompletedPages, snapshot.TotalPages)
 	}
 	if pdfName != "" {
-		return fmt.Sprintf(" | stage=%s %s", stage, pdfName)
+		return fmt.Sprintf(" | %s %s", stage, pdfName)
 	}
-	return " | stage=" + stage
+	return " | " + stage
 }
 
 func displayStageName(stage string) string {
@@ -196,10 +192,9 @@ func (r *runProgressRenderer) Render(event provider.ProgressEvent) {
 	if stage == "" {
 		stage = "run"
 	}
-	r.lastStage = stage
 
 	elapsed := time.Since(r.start)
-	line := fmt.Sprintf("%s=%s | elapsed=%s", stage, r.inputPDF, formatDuration(elapsed))
+	line := fmt.Sprintf("%s %s | %s", stage, r.inputPDF, formatDuration(elapsed))
 	if event.Stage == "vision_ocr" && event.TotalPages > 0 {
 		percent := (float64(event.CompletedPages) / float64(event.TotalPages)) * 100
 		rate := 0.0
@@ -212,7 +207,7 @@ func (r *runProgressRenderer) Render(event provider.ProgressEvent) {
 			eta = formatDuration(time.Duration(remaining * float64(time.Second)))
 		}
 		line = fmt.Sprintf(
-			"%s %6.2f%% %d/%d pages | %.2f pages/s | elapsed=%s eta=%s | %s=%s",
+			"%s %5.1f%% %d/%d pg | %.2f pg/s | %s<%s | %s %s",
 			renderProgressBar(event.CompletedPages, event.TotalPages, 24),
 			percent,
 			event.CompletedPages,
@@ -224,7 +219,7 @@ func (r *runProgressRenderer) Render(event provider.ProgressEvent) {
 			r.inputPDF,
 		)
 		if event.CurrentPage > 0 {
-			line += fmt.Sprintf(" (p%d)", event.CurrentPage)
+			line += fmt.Sprintf(" p%d", event.CurrentPage)
 		}
 	}
 
@@ -275,6 +270,18 @@ func (r *runProgressRenderer) writeLocked(line string, done bool) {
 		_, _ = fmt.Fprintln(r.w)
 		r.lastLen = 0
 	}
+}
+
+func formatBatchCounts(snapshot batch.ProgressSnapshot) string {
+	parts := []string{
+		fmt.Sprintf("ok=%d", snapshot.Succeeded),
+		fmt.Sprintf("fail=%d", snapshot.Failed),
+		fmt.Sprintf("run=%d", snapshot.Running),
+	}
+	if snapshot.Skipped > 0 {
+		parts = append(parts, fmt.Sprintf("skip=%d", snapshot.Skipped))
+	}
+	return strings.Join(parts, " ")
 }
 
 func renderProgressBar(completed, total, width int) string {

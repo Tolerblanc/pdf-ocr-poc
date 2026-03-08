@@ -62,13 +62,13 @@ func TestBatchProgressRendererShowsCurrentPDF(t *testing.T) {
 	})
 
 	printed := out.String()
-	if !strings.Contains(printed, "active=a.pdf") {
+	if !strings.Contains(printed, "active a.pdf") {
 		t.Fatalf("expected active pdf name in output, got: %q", printed)
 	}
 	if !strings.Contains(printed, "1/4 pdf") {
 		t.Fatalf("expected pdf unit in output, got: %q", printed)
 	}
-	if !strings.Contains(printed, "ocr=a.pdf 1/3 pages (p2)") {
+	if !strings.Contains(printed, "ocr a.pdf 1/3 p2") {
 		t.Fatalf("expected page progress in output, got: %q", printed)
 	}
 	if !strings.Contains(printed, "pdf/s") {
@@ -87,16 +87,16 @@ func TestRunProgressRendererShowsPageProgress(t *testing.T) {
 	})
 
 	printed := out.String()
-	if !strings.Contains(printed, "1/3 pages") {
+	if !strings.Contains(printed, "1/3 pg") {
 		t.Fatalf("expected page counter in output, got: %q", printed)
 	}
-	if !strings.Contains(printed, "ocr=a.pdf") {
+	if !strings.Contains(printed, "ocr a.pdf") {
 		t.Fatalf("expected stage and pdf name in output, got: %q", printed)
 	}
-	if !strings.Contains(printed, "(p2)") {
+	if !strings.Contains(printed, " p2") {
 		t.Fatalf("expected current page marker in output, got: %q", printed)
 	}
-	if !strings.Contains(printed, "pages/s") {
+	if !strings.Contains(printed, "pg/s") {
 		t.Fatalf("expected pages throughput label, got: %q", printed)
 	}
 	if !strings.HasPrefix(printed, "\r[") {

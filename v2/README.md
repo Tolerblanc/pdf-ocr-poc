@@ -46,7 +46,7 @@ make brew-formula URL=<release-archive-url>
   --resume
 ```
 
-`batch` now prints a tqdm-style progress line to stderr with per-PDF totals plus current per-page OCR progress for the active PDF(s).
+`batch` prints a compact tqdm-style progress line to stderr with per-PDF totals and live per-page OCR activity.
 
 ## Evaluate
 
@@ -75,6 +75,7 @@ Vision provider notes:
 
 - Current implementation performs OCR and writes all contract artifacts.
 - `max_workers` controls page-level OCR parallelism in the Swift provider.
+- `ocrpoc-go run` and `ocrpoc-go batch` both show live OCR progress from provider events.
 - `ocrpoc-go batch` shows live per-page OCR progress from the provider while the outer batch bar tracks PDF completion.
 - Build can fail if local Swift toolchain and SDK are mismatched.
 - Use `v2/providers/vision-swift/doctor.sh` to diagnose Swift toolchain issues.
