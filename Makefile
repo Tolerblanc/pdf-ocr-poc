@@ -18,6 +18,9 @@ help:
 	@printf "  make build-all        # Build Go CLI + Swift provider\n"
 	@printf "  make test             # Run Go tests\n"
 	@printf "  make smoke            # Run smoke tests with mock provider\n"
+	@printf "  make bench-max-workers [VALUES=1,2,4,8]  # Benchmark fixture_full.pdf across max_workers values\n"
+	@printf "  make bench-process-shards [SHARDS=1,2,4,8] [MAX_WORKERS_PER_SHARD=1]  # Benchmark per-process PDF shards\n"
+	@printf "  make validate-searchable SEARCHABLE=<pdf> PAGES=<json> [OUT=<report.json>]  # Validate searchable PDF extraction\n"
 	@printf "  make package          # Create release tarball under dist/\n"
 	@printf "  make brew-formula URL=<release-url>  # Generate Homebrew formula\n"
 	@printf "  make clean            # Remove build outputs\n"
@@ -67,6 +70,31 @@ smoke-batch: build-go
 smoke-eval: build-go
 	@echo "[smoke-eval]"
 	@cd "$(V2_DIR)" && ./bin/ocrpoc-go eval --gold "../fixtures/gold/v1/gold-pages.json" --pred "../artifacts/v2-smoke-make/pages.json" --out "../artifacts/v2-smoke-make/eval.json"
+
+.PHONY: bench-max-workers
+bench-max-workers: build-all
+	@echo "[bench-max-workers]"
+	@VALUES="$${VALUES:-1,2,4,8}"; \
+	OUT_ROOT="$${OUT_ROOT:-$(ROOT_DIR)/artifacts/bench-max-workers}"; \
+	cd "$(V2_DIR)" && go run ./cmd/ocrpoc-benchmax --input "../__fixtures__/fixture_full.pdf" --out-root "$$OUT_ROOT" --values "$$VALUES"
+
+.PHONY: bench-process-shards
+bench-process-shards: build-all
+	@echo "[bench-process-shards]"
+	@SHARDS="$${SHARDS:-1,2,4,8}"; \
+	MAX_WORKERS_PER_SHARD="$${MAX_WORKERS_PER_SHARD:-1}"; \
+	OUT_ROOT="$${OUT_ROOT:-$(ROOT_DIR)/artifacts/bench-process-shards}"; \
+	cd "$(V2_DIR)" && go run ./cmd/ocrpoc-benchshard --input "../__fixtures__/fixture_full.pdf" --out-root "$$OUT_ROOT" --shards "$$SHARDS" --max-workers-per-shard "$$MAX_WORKERS_PER_SHARD"
+
+.PHONY: validate-searchable
+validate-searchable:
+	@if [[ -z "$(SEARCHABLE)" || -z "$(PAGES)" ]]; then echo "SEARCHABLE and PAGES are required. Example: make validate-searchable SEARCHABLE=./artifacts/v2-vision-run/searchable.pdf PAGES=./artifacts/v2-vision-run/pages.json OUT=./artifacts/v2-vision-run/searchable_validation.json"; exit 1; fi
+	@echo "[validate-searchable]"
+	@CMD=("$(VISION_DIR)/validate_searchable_pdf.sh" --searchable-pdf "$(SEARCHABLE)" --pages-json "$(PAGES)"); \
+	if [[ -n "$(OUT)" ]]; then CMD+=(--out "$(OUT)"); fi; \
+	if [[ -n "$(MIN_COVERAGE)" ]]; then CMD+=(--min-coverage "$(MIN_COVERAGE)"); fi; \
+	if [[ -n "$(MIN_LINE_MATCH)" ]]; then CMD+=(--min-line-match "$(MIN_LINE_MATCH)"); fi; \
+	"$${CMD[@]}"
 
 .PHONY: package
 package: build-go

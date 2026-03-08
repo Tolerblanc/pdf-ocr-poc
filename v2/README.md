@@ -16,6 +16,8 @@ make doctor
 make build
 make test
 make smoke
+make bench-max-workers
+make bench-process-shards
 ```
 
 Packaging / Homebrew helper:
@@ -63,6 +65,41 @@ make brew-formula URL=<release-archive-url>
 ./bin/ocrpoc-go selfcheck-local-only
 ```
 
+## Benchmark max_workers
+
+From repository root:
+
+```bash
+make bench-max-workers VALUES=1,2,4,8
+```
+
+This writes per-run artifacts plus `summary.json` and `summary.md` under `artifacts/bench-max-workers` by default.
+
+For `vision-swift`, auto mode now resolves to `2`, because higher in-process worker counts saturate inside Vision without materially improving throughput on `fixture_full.pdf`.
+
+## Benchmark process shards
+
+From repository root:
+
+```bash
+make bench-process-shards SHARDS=1,2,4,8 MAX_WORKERS_PER_SHARD=1
+```
+
+This launches separate provider processes over contiguous PDF page shards and writes `aggregate_report.json`, `combined_pages.json`, and `summary.{json,md}` under `artifacts/bench-process-shards` by default.
+
+## Validate searchable PDF
+
+From repository root:
+
+```bash
+make validate-searchable \
+  SEARCHABLE=./artifacts/v2-vision-run/searchable.pdf \
+  PAGES=./artifacts/v2-vision-run/pages.json \
+  OUT=./artifacts/v2-vision-run/searchable_validation.json
+```
+
+The validator checks page count, non-blank extraction coverage, and per-page line-match consistency.
+
 ## Provider mode
 
 - `--provider mock`: built-in stub provider for integration and state-flow testing.
@@ -75,8 +112,10 @@ Vision provider notes:
 
 - Current implementation performs OCR and writes all contract artifacts.
 - `max_workers` controls page-level OCR parallelism in the Swift provider.
+- `vision-swift` auto mode resolves to `2`; larger manual values still work, but OCR execution is capped internally at two active Vision workers per process.
 - `ocrpoc-go run` and `ocrpoc-go batch` both show live OCR progress from provider events.
 - `ocrpoc-go batch` shows live per-page OCR progress from the provider while the outer batch bar tracks PDF completion.
+- `make validate-searchable` runs a PDFKit-based regression check against `pages.json`.
 - Build can fail if local Swift toolchain and SDK are mismatched.
 - Use `v2/providers/vision-swift/doctor.sh` to diagnose Swift toolchain issues.
 - `doctor.sh`/`build.sh` can auto-select a compatible fallback SDK; override with `SWIFT_SDK_PATH` if needed.
@@ -96,5 +135,6 @@ Vision provider notes:
 
 ## Worker behavior
 
-- `--max-workers` omitted => auto mode (`cpu-1`, capped to 8)
+- `--max-workers` omitted with `vision-swift` => auto mode (`2`)
+- `--max-workers` omitted with other providers => auto mode (`cpu-1`, capped to 8)
 - `--max-workers` set => manual mode

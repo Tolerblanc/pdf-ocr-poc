@@ -68,7 +68,10 @@ Output (provider -> Go):
 - Completed: root `Makefile` workflow (`doctor`, `build`, `test`, `smoke`, `package`, `brew-formula`).
 - Completed: Swift provider runtime validation in this environment using fallback SDK auto-selection.
 - Completed: `doctor.sh`/`build.sh` fallback SDK selection for toolchain-SDK mismatch recovery.
-- Pending: `max_workers` page-level parallelization in Swift provider.
+- Completed: `max_workers` page-level parallelization in Swift provider.
+- Completed: benchmark harness for `fixture_full.pdf` max-workers comparisons.
+- Completed: separate-process shard benchmark harness for `fixture_full.pdf` chunk sweeps.
+- Completed: searchable PDF validation script against `pages.json` extraction output.
 
 ## Acceptance for M1
 

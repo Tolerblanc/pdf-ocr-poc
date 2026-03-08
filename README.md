@@ -61,6 +61,12 @@ make test
 # Smoke tests (run + batch + eval with mock provider)
 make smoke
 
+# Benchmark fixture_full.pdf across max_workers values
+make bench-max-workers VALUES=1,2,4,8
+
+# Benchmark separate-process PDF shards
+make bench-process-shards SHARDS=1,2,4,8 MAX_WORKERS_PER_SHARD=1
+
 # Batch OCR
 ./v2/bin/ocrpoc-go batch \
   --input ./__fixtures__ \
@@ -75,6 +81,12 @@ make smoke
   --gold ./fixtures/gold/v1/gold-pages.json \
   --pred ./artifacts/v2-vision-run/pages.json \
   --out ./artifacts/v2-vision-run/eval.json
+
+# Validate searchable PDF extraction against pages.json
+make validate-searchable \
+  SEARCHABLE=./artifacts/v2-vision-run/searchable.pdf \
+  PAGES=./artifacts/v2-vision-run/pages.json \
+  OUT=./artifacts/v2-vision-run/searchable_validation.json
 ```
 
 ## Swift/SDK Troubleshooting

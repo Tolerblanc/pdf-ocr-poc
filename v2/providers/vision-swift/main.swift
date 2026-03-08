@@ -11,6 +11,8 @@ struct Request: Decodable {
     let local_only: Bool
     let max_workers: Int
     let workers_mode: String
+    let shard_index: Int?
+    let shard_total: Int?
     let request_source: String?
 }
 
@@ -98,12 +100,297 @@ struct PageArtifact {
     let ocrPage: OCRPage
 }
 
+struct PageChunk {
+    let startIndex: Int
+    let pageCount: Int
+    let shardIndex: Int?
+    let shardTotal: Int?
+}
+
+struct PageStageTiming: Encodable {
+    let page: Int
+    let renderWorker: String
+    let recognizeWorker: String
+    let renderSeconds: Double
+    let queueWaitSeconds: Double
+    let recognizeSeconds: Double
+    let postprocessSeconds: Double
+    let totalSeconds: Double
+}
+
+struct WorkerStageSummary: Encodable {
+    let worker: String
+    let pages: Int
+    let busySeconds: Double
+}
+
+struct OCRStageProfile: Encodable {
+    let mode: String
+    let requestedMaxWorkers: Int
+    let effectiveMaxWorkers: Int
+    let renderWorkers: Int
+    let recognizeWorkers: Int
+    let renderQueueCapacity: Int
+    let pageCount: Int
+    let wallSeconds: Double
+    let renderTotalSeconds: Double
+    let recognizeTotalSeconds: Double
+    let postprocessTotalSeconds: Double
+    let queueWaitTotalSeconds: Double
+    let pageTotalSeconds: Double
+    let renderAverageSeconds: Double
+    let recognizeAverageSeconds: Double
+    let postprocessAverageSeconds: Double
+    let pageAverageSeconds: Double
+    let longestPageSeconds: Double
+    let maxActivePages: Int
+    let maxActiveRenderWorkers: Int
+    let maxActiveRecognizeWorkers: Int
+    let maxQueuedRenderedPages: Int
+    let renderEffectiveParallelism: Double
+    let recognizeEffectiveParallelism: Double
+    let pageEffectiveParallelism: Double
+    let renderWorkerSummaries: [WorkerStageSummary]
+    let recognizeWorkerSummaries: [WorkerStageSummary]
+    let pages: [PageStageTiming]
+}
+
+struct OCRStageOutput {
+    let artifacts: [PageArtifact]
+    let warnings: [String]
+    let profile: OCRStageProfile
+}
+
+struct RenderedPageArtifact {
+    let index: Int
+    let pageBounds: CGRect
+    let imageWidth: Int
+    let imageHeight: Int
+    let cgImage: CGImage
+    let assignedAt: Date
+    let renderedAt: Date
+}
+
+struct MutablePageStageTiming {
+    let page: Int
+    var renderWorker: String = ""
+    var recognizeWorker: String = ""
+    var renderSeconds: Double = 0
+    var queueWaitSeconds: Double = 0
+    var recognizeSeconds: Double = 0
+    var postprocessSeconds: Double = 0
+    var totalSeconds: Double = 0
+}
+
+struct MutableWorkerStageSummary {
+    var pages: Int = 0
+    var busySeconds: Double = 0
+}
+
+final class OCRStageProfiler {
+    private let lock = NSLock()
+    private var pageTimings: [Int: MutablePageStageTiming] = [:]
+    private var renderWorkers: [String: MutableWorkerStageSummary] = [:]
+    private var recognizeWorkers: [String: MutableWorkerStageSummary] = [:]
+    private var renderTotalSeconds: Double = 0
+    private var recognizeTotalSeconds: Double = 0
+    private var postprocessTotalSeconds: Double = 0
+    private var queueWaitTotalSeconds: Double = 0
+    private var pageTotalSeconds: Double = 0
+    private var longestPageSeconds: Double = 0
+    private var activePages = 0
+    private var activeRenderWorkers = 0
+    private var activeRecognizeWorkers = 0
+    private var maxActivePages = 0
+    private var maxActiveRenderWorkers = 0
+    private var maxActiveRecognizeWorkers = 0
+    private var maxQueuedRenderedPages = 0
+
+    private func ensurePageTiming(_ page: Int) {
+        if pageTimings[page] == nil {
+            pageTimings[page] = MutablePageStageTiming(page: page)
+        }
+    }
+
+    func pageStarted(page: Int) {
+        lock.withLock {
+            activePages += 1
+            maxActivePages = max(maxActivePages, activePages)
+            ensurePageTiming(page)
+        }
+    }
+
+    func pageAborted(page: Int) {
+        lock.withLock {
+            activePages = max(0, activePages - 1)
+            ensurePageTiming(page)
+        }
+    }
+
+    func renderStarted() {
+        lock.withLock {
+            activeRenderWorkers += 1
+            maxActiveRenderWorkers = max(maxActiveRenderWorkers, activeRenderWorkers)
+        }
+    }
+
+    func renderCompleted(page: Int, worker: String, seconds: Double) {
+        lock.withLock {
+            activeRenderWorkers = max(0, activeRenderWorkers - 1)
+            renderTotalSeconds += seconds
+            var pageTiming = pageTimings[page] ?? MutablePageStageTiming(page: page)
+            pageTiming.renderWorker = worker
+            pageTiming.renderSeconds = seconds
+            pageTimings[page] = pageTiming
+
+            var summary = renderWorkers[worker] ?? MutableWorkerStageSummary()
+            summary.pages += 1
+            summary.busySeconds += seconds
+            renderWorkers[worker] = summary
+        }
+    }
+
+    func renderFailed() {
+        lock.withLock {
+            activeRenderWorkers = max(0, activeRenderWorkers - 1)
+        }
+    }
+
+    func recognizeStarted() {
+        lock.withLock {
+            activeRecognizeWorkers += 1
+            maxActiveRecognizeWorkers = max(maxActiveRecognizeWorkers, activeRecognizeWorkers)
+        }
+    }
+
+    func recognizeCompleted(page: Int, worker: String, queueWaitSeconds: Double, recognizeSeconds: Double, postprocessSeconds: Double, totalSeconds: Double) {
+        lock.withLock {
+            activeRecognizeWorkers = max(0, activeRecognizeWorkers - 1)
+            recognizeTotalSeconds += recognizeSeconds
+            postprocessTotalSeconds += postprocessSeconds
+            queueWaitTotalSeconds += queueWaitSeconds
+            pageTotalSeconds += totalSeconds
+            longestPageSeconds = max(longestPageSeconds, totalSeconds)
+            activePages = max(0, activePages - 1)
+
+            var pageTiming = pageTimings[page] ?? MutablePageStageTiming(page: page)
+            pageTiming.recognizeWorker = worker
+            pageTiming.queueWaitSeconds = queueWaitSeconds
+            pageTiming.recognizeSeconds = recognizeSeconds
+            pageTiming.postprocessSeconds = postprocessSeconds
+            pageTiming.totalSeconds = totalSeconds
+            pageTimings[page] = pageTiming
+
+            var summary = recognizeWorkers[worker] ?? MutableWorkerStageSummary()
+            summary.pages += 1
+            summary.busySeconds += recognizeSeconds + postprocessSeconds
+            recognizeWorkers[worker] = summary
+        }
+    }
+
+    func recognizeFailed(page: Int) {
+        lock.withLock {
+            activeRecognizeWorkers = max(0, activeRecognizeWorkers - 1)
+            activePages = max(0, activePages - 1)
+            ensurePageTiming(page)
+        }
+    }
+
+    func buildProfile(
+        mode: String,
+        requestedMaxWorkers: Int,
+        effectiveMaxWorkers: Int,
+        renderWorkers: Int,
+        recognizeWorkers: Int,
+        renderQueueCapacity: Int,
+        pageCount: Int,
+        wallSeconds: Double
+    ) -> OCRStageProfile {
+        let state = lock.withLock {
+            (
+                pageTimings: pageTimings,
+                renderWorkers: self.renderWorkers,
+                recognizeWorkers: self.recognizeWorkers,
+                renderTotalSeconds: renderTotalSeconds,
+                recognizeTotalSeconds: recognizeTotalSeconds,
+                postprocessTotalSeconds: postprocessTotalSeconds,
+                queueWaitTotalSeconds: queueWaitTotalSeconds,
+                pageTotalSeconds: pageTotalSeconds,
+                longestPageSeconds: longestPageSeconds,
+                maxActivePages: maxActivePages,
+                maxActiveRenderWorkers: maxActiveRenderWorkers,
+                maxActiveRecognizeWorkers: maxActiveRecognizeWorkers,
+                maxQueuedRenderedPages: maxQueuedRenderedPages
+            )
+        }
+
+        let orderedPages = state.pageTimings.keys.sorted().compactMap { page -> PageStageTiming? in
+            guard let timing = state.pageTimings[page] else {
+                return nil
+            }
+            return PageStageTiming(
+                page: page,
+                renderWorker: timing.renderWorker,
+                recognizeWorker: timing.recognizeWorker,
+                renderSeconds: timing.renderSeconds,
+                queueWaitSeconds: timing.queueWaitSeconds,
+                recognizeSeconds: timing.recognizeSeconds,
+                postprocessSeconds: timing.postprocessSeconds,
+                totalSeconds: timing.totalSeconds
+            )
+        }
+        let renderAverageSeconds = orderedPages.isEmpty ? 0 : state.renderTotalSeconds / Double(orderedPages.count)
+        let recognizeAverageSeconds = orderedPages.isEmpty ? 0 : state.recognizeTotalSeconds / Double(orderedPages.count)
+        let postprocessAverageSeconds = orderedPages.isEmpty ? 0 : state.postprocessTotalSeconds / Double(orderedPages.count)
+        let pageAverageSeconds = orderedPages.isEmpty ? 0 : state.pageTotalSeconds / Double(orderedPages.count)
+        let safeWall = max(wallSeconds, 0.000001)
+
+        return OCRStageProfile(
+            mode: mode,
+            requestedMaxWorkers: requestedMaxWorkers,
+            effectiveMaxWorkers: effectiveMaxWorkers,
+            renderWorkers: renderWorkers,
+            recognizeWorkers: recognizeWorkers,
+            renderQueueCapacity: renderQueueCapacity,
+            pageCount: pageCount,
+            wallSeconds: wallSeconds,
+            renderTotalSeconds: state.renderTotalSeconds,
+            recognizeTotalSeconds: state.recognizeTotalSeconds,
+            postprocessTotalSeconds: state.postprocessTotalSeconds,
+            queueWaitTotalSeconds: state.queueWaitTotalSeconds,
+            pageTotalSeconds: state.pageTotalSeconds,
+            renderAverageSeconds: renderAverageSeconds,
+            recognizeAverageSeconds: recognizeAverageSeconds,
+            postprocessAverageSeconds: postprocessAverageSeconds,
+            pageAverageSeconds: pageAverageSeconds,
+            longestPageSeconds: state.longestPageSeconds,
+            maxActivePages: state.maxActivePages,
+            maxActiveRenderWorkers: state.maxActiveRenderWorkers,
+            maxActiveRecognizeWorkers: state.maxActiveRecognizeWorkers,
+            maxQueuedRenderedPages: state.maxQueuedRenderedPages,
+            renderEffectiveParallelism: state.renderTotalSeconds / safeWall,
+            recognizeEffectiveParallelism: state.recognizeTotalSeconds / safeWall,
+            pageEffectiveParallelism: state.pageTotalSeconds / safeWall,
+            renderWorkerSummaries: state.renderWorkers.keys.sorted().map { worker in
+                let summary = state.renderWorkers[worker] ?? MutableWorkerStageSummary()
+                return WorkerStageSummary(worker: worker, pages: summary.pages, busySeconds: summary.busySeconds)
+            },
+            recognizeWorkerSummaries: state.recognizeWorkers.keys.sorted().map { worker in
+                let summary = state.recognizeWorkers[worker] ?? MutableWorkerStageSummary()
+                return WorkerStageSummary(worker: worker, pages: summary.pages, busySeconds: summary.busySeconds)
+            },
+            pages: orderedPages
+        )
+    }
+}
+
 enum ProviderError: Error {
     case invalidRequest
     case invalidInputPDF(String)
     case failedToLoadPDF(String)
     case failedToRenderPage(Int)
     case failedToRecognizePage(Int)
+    case invalidShardConfiguration(String)
 }
 
 extension NSLock {
@@ -300,9 +587,44 @@ func recognizeLines(cgImage: CGImage, pageNumber: Int) throws -> [RecognizedLine
     }
 }
 
-func processPage(page: PDFPage, pageNumber: Int, scale: CGFloat) throws -> PageArtifact {
+func renderPageArtifact(
+    page: PDFPage,
+    pageNumber: Int,
+    scale: CGFloat,
+    workerID: String,
+    assignedAt: Date,
+    profiler: OCRStageProfiler
+) throws -> RenderedPageArtifact {
+    profiler.renderStarted()
+    let renderStart = Date()
     let cgImage = try renderPageImage(page: page, scale: scale, pageNumber: pageNumber)
-    let lines = try recognizeLines(cgImage: cgImage, pageNumber: pageNumber)
+    let renderSeconds = Date().timeIntervalSince(renderStart)
+    profiler.renderCompleted(page: pageNumber, worker: workerID, seconds: renderSeconds)
+
+    return RenderedPageArtifact(
+        index: pageNumber - 1,
+        pageBounds: page.bounds(for: .mediaBox),
+        imageWidth: cgImage.width,
+        imageHeight: cgImage.height,
+        cgImage: cgImage,
+        assignedAt: assignedAt,
+        renderedAt: Date()
+    )
+}
+
+func recognizeRenderedPage(
+    _ rendered: RenderedPageArtifact,
+    pageNumber: Int,
+    workerID: String,
+    profiler: OCRStageProfiler
+) throws -> PageArtifact {
+    profiler.recognizeStarted()
+    let queueWaitSeconds = max(0, Date().timeIntervalSince(rendered.renderedAt))
+    let recognizeStart = Date()
+    let lines = try recognizeLines(cgImage: rendered.cgImage, pageNumber: pageNumber)
+    let recognizeSeconds = Date().timeIntervalSince(recognizeStart)
+
+    let postprocessStart = Date()
 
     var blocks: [OCRBlock] = []
     for (index, line) in lines.enumerated() {
@@ -319,22 +641,31 @@ func processPage(page: PDFPage, pageNumber: Int, scale: CGFloat) throws -> PageA
     }
 
     let pageText = blocks.map { $0.text }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    let bounds = page.bounds(for: .mediaBox)
+    let postprocessSeconds = Date().timeIntervalSince(postprocessStart)
+    let totalSeconds = Date().timeIntervalSince(rendered.assignedAt)
+    profiler.recognizeCompleted(
+        page: pageNumber,
+        worker: workerID,
+        queueWaitSeconds: queueWaitSeconds,
+        recognizeSeconds: recognizeSeconds,
+        postprocessSeconds: postprocessSeconds,
+        totalSeconds: totalSeconds
+    )
 
     let ocrPage = OCRPage(
         page: pageNumber,
-        width: cgImage.width,
-        height: cgImage.height,
+        width: rendered.imageWidth,
+        height: rendered.imageHeight,
         isBlank: pageText.isEmpty,
         text: pageText,
         blocks: blocks
     )
 
     return PageArtifact(
-        index: pageNumber - 1,
-        pageBounds: bounds,
-        imageWidth: cgImage.width,
-        imageHeight: cgImage.height,
+        index: rendered.index,
+        pageBounds: rendered.pageBounds,
+        imageWidth: rendered.imageWidth,
+        imageHeight: rendered.imageHeight,
         ocrPage: ocrPage
     )
 }
@@ -347,15 +678,96 @@ func effectiveOCRWorkers(requested: Int, totalPages: Int) -> Int {
     return min(bounded, totalPages)
 }
 
-func processDocumentPages(inputPDF: String, pageCount: Int, scale: CGFloat, maxWorkers: Int) throws -> ([PageArtifact], [String]) {
+func tunedVisionWorkers(requested: Int, totalPages: Int) -> Int {
+    let effectiveWorkers = effectiveOCRWorkers(requested: requested, totalPages: totalPages)
+    if effectiveWorkers <= 1 {
+        return effectiveWorkers
+    }
+    return min(2, effectiveWorkers)
+}
+
+func resolvePageChunk(pageCount: Int, shardIndex: Int?, shardTotal: Int?) throws -> PageChunk {
+    let index = shardIndex ?? 0
+    let total = shardTotal ?? 0
+    if index == 0 && total == 0 {
+        return PageChunk(startIndex: 0, pageCount: pageCount, shardIndex: nil, shardTotal: nil)
+    }
+    guard index >= 1, total >= 1, index <= total else {
+        throw ProviderError.invalidShardConfiguration("invalid shard request index=\(index) total=\(total)")
+    }
+    if pageCount > 0 && total > pageCount {
+        throw ProviderError.invalidShardConfiguration("shard_total exceeds page_count total=\(total) page_count=\(pageCount)")
+    }
+    let base = pageCount / total
+    let remainder = pageCount % total
+    let extraBefore = min(index - 1, remainder)
+    let startIndex = ((index - 1) * base) + extraBefore
+    let chunkPageCount = base + (index <= remainder ? 1 : 0)
+    return PageChunk(startIndex: startIndex, pageCount: chunkPageCount, shardIndex: index, shardTotal: total)
+}
+
+func processPageInline(
+    page: PDFPage,
+    pageNumber: Int,
+    scale: CGFloat,
+    workerID: String,
+    assignedAt: Date,
+    profiler: OCRStageProfiler
+) throws -> PageArtifact {
+    let rendered: RenderedPageArtifact
+    do {
+        rendered = try renderPageArtifact(
+            page: page,
+            pageNumber: pageNumber,
+            scale: scale,
+            workerID: workerID,
+            assignedAt: assignedAt,
+            profiler: profiler
+        )
+    } catch {
+        profiler.renderFailed()
+        profiler.pageAborted(page: pageNumber)
+        throw error
+    }
+
+    do {
+        return try recognizeRenderedPage(rendered, pageNumber: pageNumber, workerID: workerID, profiler: profiler)
+    } catch {
+        profiler.recognizeFailed(page: pageNumber)
+        throw error
+    }
+}
+
+func processDocumentPages(inputPDF: String, pageChunk: PageChunk, scale: CGFloat, maxWorkers: Int) throws -> OCRStageOutput {
+    let pageCount = pageChunk.pageCount
+    if pageCount == 0 {
+        let profile = OCRStageProfiler().buildProfile(
+            mode: "capped_page_workers",
+            requestedMaxWorkers: maxWorkers,
+            effectiveMaxWorkers: 0,
+            renderWorkers: 0,
+            recognizeWorkers: 0,
+            renderQueueCapacity: 0,
+            pageCount: 0,
+            wallSeconds: 0
+        )
+        return OCRStageOutput(artifacts: [], warnings: [], profile: profile)
+    }
+
     let workerCount = effectiveOCRWorkers(requested: maxWorkers, totalPages: pageCount)
+    let visionWorkers = tunedVisionWorkers(requested: maxWorkers, totalPages: pageCount)
     let lock = NSLock()
+    let profiler = OCRStageProfiler()
     var nextIndex = 0
     var completedPages = 0
     var firstError: Error?
     var warnings: [String] = []
     var artifacts = Array<PageArtifact?>(repeating: nil, count: pageCount)
     let inputURL = URL(fileURLWithPath: inputPDF)
+    let stageStart = Date()
+    if visionWorkers < workerCount {
+        warnings.append("vision_recognize_workers_capped=\(visionWorkers)")
+    }
 
     emitProgress(
         ProgressEvent(
@@ -368,8 +780,9 @@ func processDocumentPages(inputPDF: String, pageCount: Int, scale: CGFloat, maxW
     )
 
     let group = DispatchGroup()
-    for _ in 0..<workerCount {
+    for workerIndex in 0..<visionWorkers {
         group.enter()
+        let workerID = String(format: "ocr-%02d", workerIndex + 1)
         DispatchQueue.global(qos: .userInitiated).async {
             defer { group.leave() }
 
@@ -394,27 +807,39 @@ func processDocumentPages(inputPDF: String, pageCount: Int, scale: CGFloat, maxW
                 guard let idx = pageIndex else {
                     return
                 }
+                let absoluteIndex = pageChunk.startIndex + idx
+                let pageNumber = absoluteIndex + 1
 
+                let assignedAt = Date()
                 emitProgress(
                     ProgressEvent(
                         phase: "page_started",
                         stage: "vision_ocr",
-                        current_page: idx + 1,
+                        current_page: pageNumber,
                         completed_pages: lock.withLock { completedPages },
                         total_pages: pageCount
                     )
                 )
+                profiler.pageStarted(page: pageNumber)
 
                 autoreleasepool {
-                    guard let page = workerDocument.page(at: idx) else {
+                    guard let page = workerDocument.page(at: absoluteIndex) else {
                         lock.withLock {
-                            warnings.append("missing_pdf_page_\(idx + 1)")
+                            warnings.append("missing_pdf_page_\(pageNumber)")
                         }
+                        profiler.pageAborted(page: pageNumber)
                         return
                     }
 
                     do {
-                        let artifact = try processPage(page: page, pageNumber: idx + 1, scale: scale)
+                        let artifact = try processPageInline(
+                            page: page,
+                            pageNumber: pageNumber,
+                            scale: scale,
+                            workerID: workerID,
+                            assignedAt: assignedAt,
+                            profiler: profiler
+                        )
                         let completed = lock.withLock { () -> Int in
                             artifacts[idx] = artifact
                             completedPages += 1
@@ -424,7 +849,7 @@ func processDocumentPages(inputPDF: String, pageCount: Int, scale: CGFloat, maxW
                             ProgressEvent(
                                 phase: "page_done",
                                 stage: "vision_ocr",
-                                current_page: idx + 1,
+                                current_page: pageNumber,
                                 completed_pages: completed,
                                 total_pages: pageCount
                             )
@@ -435,6 +860,7 @@ func processDocumentPages(inputPDF: String, pageCount: Int, scale: CGFloat, maxW
                                 firstError = error
                             }
                         }
+                        return
                     }
                 }
             }
@@ -457,7 +883,18 @@ func processDocumentPages(inputPDF: String, pageCount: Int, scale: CGFloat, maxW
             total_pages: pageCount
         )
     )
-    return (orderedArtifacts, warnings)
+    let wallSeconds = Date().timeIntervalSince(stageStart)
+    let profile = profiler.buildProfile(
+        mode: "capped_page_workers",
+        requestedMaxWorkers: maxWorkers,
+        effectiveMaxWorkers: workerCount,
+        renderWorkers: visionWorkers,
+        recognizeWorkers: visionWorkers,
+        renderQueueCapacity: 0,
+        pageCount: pageCount,
+        wallSeconds: wallSeconds
+    )
+    return OCRStageOutput(artifacts: orderedArtifacts, warnings: warnings, profile: profile)
 }
 
 func pdfRect(for block: OCRBlock, artifact: PageArtifact) -> CGRect {
@@ -598,6 +1035,41 @@ func writeDocument(_ document: OCRDocument, to path: String) throws {
     try writeFile(path: path, content: payload)
 }
 
+func writeOCRStageProfile(_ profile: OCRStageProfile, to path: String) throws {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.keyEncodingStrategy = .convertToSnakeCase
+    var payload = try encoder.encode(profile)
+    payload.append(Data("\n".utf8))
+    try writeFile(path: path, content: payload)
+}
+
+func ocrStageTimingMap(_ profile: OCRStageProfile) -> [String: Double] {
+    return [
+        "vision_ocr_seconds": profile.wallSeconds,
+        "vision_ocr_render_seconds_total": profile.renderTotalSeconds,
+        "vision_ocr_recognize_seconds_total": profile.recognizeTotalSeconds,
+        "vision_ocr_postprocess_seconds_total": profile.postprocessTotalSeconds,
+        "vision_ocr_queue_wait_seconds_total": profile.queueWaitTotalSeconds,
+        "vision_ocr_page_seconds_total": profile.pageTotalSeconds,
+        "vision_ocr_render_average_seconds": profile.renderAverageSeconds,
+        "vision_ocr_recognize_average_seconds": profile.recognizeAverageSeconds,
+        "vision_ocr_postprocess_average_seconds": profile.postprocessAverageSeconds,
+        "vision_ocr_page_average_seconds": profile.pageAverageSeconds,
+        "vision_ocr_longest_page_seconds": profile.longestPageSeconds,
+        "vision_ocr_render_workers": Double(profile.renderWorkers),
+        "vision_ocr_recognize_workers": Double(profile.recognizeWorkers),
+        "vision_ocr_render_queue_capacity": Double(profile.renderQueueCapacity),
+        "vision_ocr_max_active_pages": Double(profile.maxActivePages),
+        "vision_ocr_max_active_render_workers": Double(profile.maxActiveRenderWorkers),
+        "vision_ocr_max_active_recognize_workers": Double(profile.maxActiveRecognizeWorkers),
+        "vision_ocr_max_queued_rendered_pages": Double(profile.maxQueuedRenderedPages),
+        "vision_ocr_render_effective_parallelism": profile.renderEffectiveParallelism,
+        "vision_ocr_recognize_effective_parallelism": profile.recognizeEffectiveParallelism,
+        "vision_ocr_page_effective_parallelism": profile.pageEffectiveParallelism,
+    ]
+}
+
 func renderText(pages: [OCRPage]) -> String {
     return pages.map { $0.text }.joined(separator: "\n\n")
 }
@@ -653,15 +1125,21 @@ func run() throws {
     let renderScaleValue = renderScale(for: request.profile)
     let ocrStart = Date()
     var warnings: [String] = []
-    let (artifacts, ocrWarnings) = try processDocumentPages(
-        inputPDF: request.input_pdf,
+    let pageChunk = try resolvePageChunk(
         pageCount: document.pageCount,
+        shardIndex: request.shard_index,
+        shardTotal: request.shard_total
+    )
+    let ocrStage = try processDocumentPages(
+        inputPDF: request.input_pdf,
+        pageChunk: pageChunk,
         scale: renderScaleValue,
         maxWorkers: request.max_workers
     )
-    warnings.append(contentsOf: ocrWarnings)
+    warnings.append(contentsOf: ocrStage.warnings)
     let ocrSeconds = Date().timeIntervalSince(ocrStart)
 
+    let artifacts = ocrStage.artifacts
     let pages = artifacts.map { $0.ocrPage }
     let ocrDocument = OCRDocument(engine: "vision-swift", sourcePDF: request.input_pdf, pages: pages)
 
@@ -669,6 +1147,8 @@ func run() throws {
     let textPath = (request.output_dir as NSString).appendingPathComponent("document.txt")
     let markdownPath = (request.output_dir as NSString).appendingPathComponent("document.md")
     let searchablePDF = (request.output_dir as NSString).appendingPathComponent("searchable.pdf")
+    let ocrStageProfilePath = (request.output_dir as NSString).appendingPathComponent("ocr_stage_profile.json")
+    try writeOCRStageProfile(ocrStage.profile, to: ocrStageProfilePath)
 
     let serializeStart = Date()
     emitProgress(
@@ -677,7 +1157,7 @@ func run() throws {
             stage: "serialization",
             current_page: nil,
             completed_pages: nil,
-            total_pages: document.pageCount
+            total_pages: pageChunk.pageCount
         )
     )
     try writeDocument(ocrDocument, to: pagesJSON)
@@ -692,7 +1172,7 @@ func run() throws {
             stage: "searchable_pdf",
             current_page: nil,
             completed_pages: nil,
-            total_pages: document.pageCount
+            total_pages: pageChunk.pageCount
         )
     )
     let (_, searchableWarnings) = buildSearchablePDF(inputPDF: request.input_pdf, outputPDF: searchablePDF, artifacts: artifacts)
@@ -700,18 +1180,18 @@ func run() throws {
     let searchableSeconds = Date().timeIntervalSince(searchableStart)
 
     let totalSeconds = Date().timeIntervalSince(totalStart)
+    var stageTimings = ocrStageTimingMap(ocrStage.profile)
+    stageTimings["vision_ocr_seconds"] = ocrSeconds
+    stageTimings["serialization_seconds"] = serializeSeconds
+    stageTimings["searchable_pdf_seconds"] = searchableSeconds
+    stageTimings["provider_total_seconds"] = totalSeconds
 
     let result = Result(
         searchable_pdf: searchablePDF,
         pages_json: pagesJSON,
         text_path: textPath,
         markdown_path: markdownPath,
-        stage_timings: [
-            "vision_ocr_seconds": ocrSeconds,
-            "serialization_seconds": serializeSeconds,
-            "searchable_pdf_seconds": searchableSeconds,
-            "provider_total_seconds": totalSeconds
-        ],
+        stage_timings: stageTimings,
         warnings: warnings
     )
 

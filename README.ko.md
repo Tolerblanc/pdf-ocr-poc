@@ -61,6 +61,12 @@ make test
 # 스모크 테스트(run + batch + eval with mock provider)
 make smoke
 
+# fixture_full.pdf 기준 max_workers 벤치마크
+make bench-max-workers VALUES=1,2,4,8
+
+# PDF를 별도 프로세스 shard로 나눠 실행하는 벤치마크
+make bench-process-shards SHARDS=1,2,4,8 MAX_WORKERS_PER_SHARD=1
+
 # Batch OCR
 ./v2/bin/ocrpoc-go batch \
   --input ./__fixtures__ \
@@ -75,6 +81,12 @@ make smoke
   --gold ./fixtures/gold/v1/gold-pages.json \
   --pred ./artifacts/v2-vision-run/pages.json \
   --out ./artifacts/v2-vision-run/eval.json
+
+# searchable PDF 추출 결과를 pages.json과 대조 검증
+make validate-searchable \
+  SEARCHABLE=./artifacts/v2-vision-run/searchable.pdf \
+  PAGES=./artifacts/v2-vision-run/pages.json \
+  OUT=./artifacts/v2-vision-run/searchable_validation.json
 ```
 
 ## Swift/SDK 문제 해결

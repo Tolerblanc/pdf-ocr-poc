@@ -21,6 +21,8 @@
         "local_only": { "type": "boolean" },
         "max_workers": { "type": "integer", "minimum": 0 },
         "workers_mode": { "type": "string", "enum": ["auto", "manual"] },
+        "shard_index": { "type": "integer", "minimum": 1 },
+        "shard_total": { "type": "integer", "minimum": 1 },
         "request_source": { "type": "string" }
       },
       "additionalProperties": false

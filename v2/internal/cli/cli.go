@@ -77,7 +77,7 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	workers, mode := resolveWorkers(*maxWorkers)
+	workers, mode := resolveWorkers(*maxWorkers, *providerName, *providerBin)
 	p, err := provider.New(*providerName, *providerBin)
 	if err != nil {
 		fmt.Fprintf(stderr, "provider error: %v\n", err)
@@ -156,7 +156,7 @@ func batchCommand(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	resolvedMaxWorkers, mode := resolveWorkers(*maxWorkers)
+	resolvedMaxWorkers, mode := resolveWorkers(*maxWorkers, *providerName, *providerBin)
 	p, err := provider.New(*providerName, *providerBin)
 	if err != nil {
 		fmt.Fprintf(stderr, "provider error: %v\n", err)
@@ -241,22 +241,11 @@ func selfcheckLocalOnlyCommand(stdout, stderr io.Writer) int {
 	return 1
 }
 
-func resolveWorkers(maxWorkers int) (int, string) {
+func resolveWorkers(maxWorkers int, providerName, providerBin string) (int, string) {
 	if maxWorkers > 0 {
 		return maxWorkers, "manual"
 	}
-	return autoMaxWorkers(), "auto"
-}
-
-func autoMaxWorkers() int {
-	workers := runtime.NumCPU() - 1
-	if workers < 1 {
-		workers = 1
-	}
-	if workers > 8 {
-		workers = 8
-	}
-	return workers
+	return provider.ResolveAutoMaxWorkers(providerName, providerBin), "auto"
 }
 
 func isSupportedPlatform() bool {

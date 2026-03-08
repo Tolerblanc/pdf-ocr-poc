@@ -16,6 +16,8 @@ type Request struct {
 	LocalOnly     bool            `json:"local_only"`
 	MaxWorkers    int             `json:"max_workers"`
 	WorkersMode   string          `json:"workers_mode"`
+	ShardIndex    int             `json:"shard_index,omitempty"`
+	ShardTotal    int             `json:"shard_total,omitempty"`
 	RequestSource string          `json:"request_source,omitempty"`
 	OnProgress    ProgressHandler `json:"-"`
 }

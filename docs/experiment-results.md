@@ -1,6 +1,6 @@
 # OCR Experiment Results (No Winner Fixed Yet)
 
-Last updated: 2026-03-02
+Last updated: 2026-03-08
 
 ## Scope
 
@@ -65,6 +65,54 @@ Source artifacts:
 - `benchmarks/perf-full-apple-vision-w8-v2/local_only_report.json`
 - `benchmarks/perf-full-apple-vision-auto-v1/run_report.json`
 - `benchmarks/perf-full-apple-vision-auto-v1/local_only_report.json`
+
+## V2 Vision Swift max_workers benchmark (328 pages)
+
+Fixture: `__fixtures__/fixture_full.pdf`
+
+Artifacts root: `artifacts/bench-worker-sweep-auto2-20260308`
+
+| Label | Engine | Max Workers | Mode | Seconds | Pages/min | OCR Stage(s) | Searchable PDF Stage(s) | Speedup vs w1 |
+|---|---|---:|---|---:|---:|---:|---:|---:|
+| `w1` | vision-swift | 1 | manual | 82.862 | 237.502 | 74.776 | 7.544 | 1.00x |
+| `w2` | vision-swift | 2 | manual | 78.775 | 249.826 | 71.112 | 7.517 | 1.05x |
+| `w8` | vision-swift | 8 | manual | 79.095 | 248.816 | 71.340 | 7.612 | 1.05x |
+| `auto` | vision-swift | 2 | auto | 78.575 | 250.463 | 70.978 | 7.453 | 1.05x |
+
+Observations:
+
+- `w2`, `w8`, and `auto` are effectively tied; the extra `w8` worker budget does not produce additional OCR throughput on this fixture.
+- `auto` now resolves to `2` for `vision-swift`, and it lands on the fastest observed configuration in this rerun.
+- `ocr_stage_profile.json` shows the saturation point directly: `w8` still reports `vision_ocr_max_active_recognize_workers=2`, `vision_ocr_max_active_render_workers=2`, and emits `vision_recognize_workers_capped=2`.
+- The OCR stage still dominates total runtime (`~71s` of `~79s`), while searchable PDF generation remains a small tail (`~7.5s`).
+- The benchmark harness is reproducible via `make bench-max-workers VALUES=1,2,8,auto`.
+
+## V2 Vision Swift process-shard benchmark (328 pages)
+
+Fixture: `__fixtures__/fixture_full.pdf`
+
+Artifacts root: `artifacts/bench-process-shards-20260308`
+
+| Label | Shards | Workers/Shard | Mode | Seconds | Pages/min | OCR Total(s) | Slowest Shard(s) | Speedup vs s1-w1 |
+|---|---:|---:|---|---:|---:|---:|---:|---:|
+| `s1-w1` | 1 | 1 | manual | 84.553 | 232.753 | 76.678 | 84.497 | 1.00x |
+| `s2-w1` | 2 | 1 | manual | 49.259 | 399.523 | 89.168 | 49.209 | 1.72x |
+| `s4-w1` | 4 | 1 | manual | 35.028 | 561.829 | 126.212 | 34.976 | 2.41x |
+| `s8-w1` | 8 | 1 | manual | 37.584 | 523.621 | 268.293 | 37.509 | 2.25x |
+
+Observations:
+
+- Splitting the PDF into separate provider processes scales materially better than pushing a single process from `w2` to `w8`.
+- `s4-w1` is the best result in this sweep, reaching `35.028s` (`2.41x` faster than `s1-w1`, `2.26x` faster than in-process `w8`).
+- `s8-w1` regresses slightly versus `s4-w1`, which suggests process-level contention starts showing up beyond four shards on this machine.
+- Each shard stays internally serial (`vision_ocr_max_active_recognize_workers=1` per shard), so the speedup comes from process-level parallelism rather than additional in-process Vision workers.
+- The shard harness is reproducible via `make bench-process-shards SHARDS=1,2,4,8 MAX_WORKERS_PER_SHARD=1`.
+
+Searchable PDF validation on `w8` output:
+
+- Command: `make validate-searchable SEARCHABLE=./artifacts/bench-max-workers-20260308/w8/searchable.pdf PAGES=./artifacts/bench-max-workers-20260308/w8/pages.json OUT=./artifacts/bench-max-workers-20260308/w8/searchable_validation.json`
+- Result: page count matched (`328/328`) and non-blank coverage passed (`308/308`), but line-match validation failed on pages `1, 93, 173, 213, 237`.
+- Aggregate metrics: average line match ratio `0.9777`, minimum line match ratio `0.4667`.
 
 ## PRD Gate Check Snapshot
 
