@@ -18,6 +18,8 @@
 - `[x]` `max_workers` 미적용 상태를 CLI 경고로 명확히 표시 (`run`/`batch` 출력 개선)
 - `[x]` searchable PDF 생성 시 `FreeText annotation overlay` 제거
 - `[x]` searchable PDF 생성 경로를 CoreGraphics 기반 텍스트 레이어 방식으로 교체
+- `[x]` batch tqdm 스타일 진행바에 PDF별/페이지별 진행 상태 표시 추가
+- `[x]` Swift provider에서 `max_workers` 기반 page-level 병렬 OCR 구현
 
 ## 우선순위별 개선 항목
 
@@ -27,9 +29,9 @@
   - 증상: `fixture_full.pdf` 결과 텍스트가 문맥 불일치/깨짐 비율이 높음
   - 완료 조건: `fixture_full.pdf` 샘플 페이지군(최소 20페이지)에서 수동 검수 + 자동 지표 동시 개선
 
-- `[ ]` **`max_workers` 실제 page-level 병렬 OCR 구현 (Swift provider)**
-  - 현재: 파싱만 하고 실제 OCR은 직렬 실행
-  - 완료 조건: `max_workers_not_applied_yet_in_swift_provider` 경고 제거, worker 수 변경에 따라 OCR stage 시간 유의미하게 단축
+- `[x]` **`max_workers` 실제 page-level 병렬 OCR 구현 (Swift provider)**
+  - 반영: worker별 `PDFDocument`를 사용해 페이지 OCR을 병렬 처리
+  - 확인 포인트: provider progress 이벤트와 함께 page-level 진행률이 batch 출력에 반영됨
 
 - `[ ]` **searchable PDF 텍스트 레이어 검증 스크립트 추가**
   - 검증: 페이지별 텍스트 추출 가능 여부, non-blank 페이지 커버리지, extraction consistency

@@ -65,7 +65,7 @@ func (r *batchProgressRenderer) Render(snapshot batch.ProgressSnapshot) {
 	}
 
 	line := fmt.Sprintf(
-		"%s %6.2f%% %d/%d pdf | ok=%d fail=%d skip=%d run=%d | %.2f pdf/s | elapsed=%s eta=%s%s",
+		"%s %6.2f%% %d/%d pdf | ok=%d fail=%d skip=%d run=%d | %.2f pdf/s | elapsed=%s eta=%s%s%s",
 		renderProgressBar(snapshot.Completed, snapshot.Total, 24),
 		percent,
 		snapshot.Completed,
@@ -78,6 +78,7 @@ func (r *batchProgressRenderer) Render(snapshot batch.ProgressSnapshot) {
 		formatDuration(snapshot.Elapsed),
 		eta,
 		r.describePDFActivity(),
+		describePageProgress(snapshot),
 	)
 
 	r.write(line, snapshot.Phase == batch.ProgressPhaseDone)
@@ -130,6 +131,37 @@ func (r *batchProgressRenderer) describePDFActivity() string {
 		return " | last=" + r.lastPDF
 	}
 	return ""
+}
+
+func describePageProgress(snapshot batch.ProgressSnapshot) string {
+	if snapshot.CurrentStage == "" {
+		return ""
+	}
+	pdfName := filepath.Base(snapshot.CurrentInputPDF)
+	stage := displayStageName(snapshot.CurrentStage)
+	if snapshot.CurrentStage == "vision_ocr" && snapshot.TotalPages > 0 {
+		if snapshot.CurrentPage > 0 {
+			return fmt.Sprintf(" | %s=%s %d/%d pages (p%d)", stage, pdfName, snapshot.CompletedPages, snapshot.TotalPages, snapshot.CurrentPage)
+		}
+		return fmt.Sprintf(" | %s=%s %d/%d pages", stage, pdfName, snapshot.CompletedPages, snapshot.TotalPages)
+	}
+	if pdfName != "" {
+		return fmt.Sprintf(" | stage=%s %s", stage, pdfName)
+	}
+	return " | stage=" + stage
+}
+
+func displayStageName(stage string) string {
+	switch stage {
+	case "vision_ocr":
+		return "ocr"
+	case "serialization":
+		return "serialize"
+	case "searchable_pdf":
+		return "searchable"
+	default:
+		return stage
+	}
 }
 
 func (r *batchProgressRenderer) Finish() {

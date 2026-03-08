@@ -10,13 +10,24 @@ import (
 )
 
 type Request struct {
-	InputPDF      string `json:"input_pdf"`
-	OutputDir     string `json:"output_dir"`
-	Profile       string `json:"profile"`
-	LocalOnly     bool   `json:"local_only"`
-	MaxWorkers    int    `json:"max_workers"`
-	WorkersMode   string `json:"workers_mode"`
-	RequestSource string `json:"request_source,omitempty"`
+	InputPDF      string          `json:"input_pdf"`
+	OutputDir     string          `json:"output_dir"`
+	Profile       string          `json:"profile"`
+	LocalOnly     bool            `json:"local_only"`
+	MaxWorkers    int             `json:"max_workers"`
+	WorkersMode   string          `json:"workers_mode"`
+	RequestSource string          `json:"request_source,omitempty"`
+	OnProgress    ProgressHandler `json:"-"`
+}
+
+type ProgressHandler func(ProgressEvent)
+
+type ProgressEvent struct {
+	Phase          string `json:"phase"`
+	Stage          string `json:"stage,omitempty"`
+	CurrentPage    int    `json:"current_page,omitempty"`
+	CompletedPages int    `json:"completed_pages,omitempty"`
+	TotalPages     int    `json:"total_pages,omitempty"`
 }
 
 type Result struct {

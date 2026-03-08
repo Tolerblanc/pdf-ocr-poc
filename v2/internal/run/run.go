@@ -20,6 +20,7 @@ type Options struct {
 	LocalOnly      bool
 	MaxWorkers     int
 	MaxWorkersMode string
+	OnProgress     provider.ProgressHandler
 }
 
 type Output struct {
@@ -57,6 +58,7 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 		MaxWorkers:    opts.MaxWorkers,
 		WorkersMode:   opts.MaxWorkersMode,
 		RequestSource: "ocrpoc-go",
+		OnProgress:    opts.OnProgress,
 	})
 	if err != nil {
 		return Output{}, err

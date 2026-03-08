@@ -11,7 +11,8 @@ import (
 )
 
 type runStubProvider struct {
-	result provider.Result
+	result   provider.Result
+	progress []provider.ProgressEvent
 }
 
 func (p *runStubProvider) Name() string {
@@ -19,6 +20,11 @@ func (p *runStubProvider) Name() string {
 }
 
 func (p *runStubProvider) Run(_ context.Context, req provider.Request) (provider.Result, error) {
+	for _, event := range p.progress {
+		if req.OnProgress != nil {
+			req.OnProgress(event)
+		}
+	}
 	if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
 		return provider.Result{}, err
 	}
@@ -46,6 +52,45 @@ func (p *runStubProvider) Run(_ context.Context, req provider.Request) (provider
 	result.TextPath = textPath
 	result.MarkdownPath = markdownPath
 	return result, nil
+}
+
+func TestExecuteForwardsProviderProgress(t *testing.T) {
+	temp := t.TempDir()
+	inputPDF := filepath.Join(temp, "in.pdf")
+	if err := os.WriteFile(inputPDF, []byte("%PDF-1.4\n"), 0o644); err != nil {
+		t.Fatalf("write input failed: %v", err)
+	}
+
+	outDir := filepath.Join(temp, "out")
+	stub := &runStubProvider{progress: []provider.ProgressEvent{{
+		Phase:          "page_done",
+		Stage:          "vision_ocr",
+		CurrentPage:    1,
+		CompletedPages: 1,
+		TotalPages:     3,
+	}}}
+
+	events := []provider.ProgressEvent{}
+	_, err := Execute(context.Background(), stub, Options{
+		InputPDF:       inputPDF,
+		OutputDir:      outDir,
+		Profile:        "fast",
+		LocalOnly:      false,
+		MaxWorkers:     2,
+		MaxWorkersMode: "manual",
+		OnProgress: func(event provider.ProgressEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one progress event, got %d", len(events))
+	}
+	if events[0].Stage != "vision_ocr" || events[0].CompletedPages != 1 || events[0].TotalPages != 3 {
+		t.Fatalf("unexpected progress event: %+v", events[0])
+	}
 }
 
 func TestExecuteWritesLocalOnlyReportFromProviderMetadata(t *testing.T) {

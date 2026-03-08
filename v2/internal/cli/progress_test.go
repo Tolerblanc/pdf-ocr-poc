@@ -52,6 +52,10 @@ func TestBatchProgressRendererShowsCurrentPDF(t *testing.T) {
 		Completed:       1,
 		Succeeded:       1,
 		Running:         1,
+		CurrentStage:    "vision_ocr",
+		CurrentPage:     2,
+		CompletedPages:  1,
+		TotalPages:      3,
 		CurrentInputPDF: "/tmp/contracts/a.pdf",
 		Elapsed:         2 * time.Second,
 	})
@@ -62,6 +66,9 @@ func TestBatchProgressRendererShowsCurrentPDF(t *testing.T) {
 	}
 	if !strings.Contains(printed, "1/4 pdf") {
 		t.Fatalf("expected pdf unit in output, got: %q", printed)
+	}
+	if !strings.Contains(printed, "ocr=a.pdf 1/3 pages (p2)") {
+		t.Fatalf("expected page progress in output, got: %q", printed)
 	}
 	if !strings.Contains(printed, "pdf/s") {
 		t.Fatalf("expected pdf throughput label, got: %q", printed)

@@ -62,6 +62,10 @@ type ProgressSnapshot struct {
 	Skipped          int
 	EffectiveWorkers int
 	CurrentInputPDF  string
+	CurrentStage     string
+	CurrentPage      int
+	CompletedPages   int
+	TotalPages       int
 	CurrentError     string
 	Elapsed          time.Duration
 }
@@ -138,6 +142,7 @@ func Run(ctx context.Context, p provider.Provider, opts Options) (Report, error)
 		0,
 		totalAttempts,
 		"",
+		provider.ProgressEvent{},
 		"",
 	))
 
@@ -169,6 +174,7 @@ func Run(ctx context.Context, p provider.Provider, opts Options) (Report, error)
 		totalAttempts,
 		totalAttempts,
 		"",
+		provider.ProgressEvent{},
 		"",
 	))
 
@@ -257,6 +263,7 @@ func runJobs(
 					attempt,
 					totalAttempts,
 					job.InputPDF,
+					provider.ProgressEvent{},
 					"",
 				)
 				emitStart = true
@@ -272,6 +279,22 @@ func runJobs(
 					LocalOnly:      opts.LocalOnly,
 					MaxWorkers:     opts.MaxWorkers,
 					MaxWorkersMode: opts.MaxWorkersMode,
+					OnProgress: func(event provider.ProgressEvent) {
+						mu.Lock()
+						snapshot := buildProgressSnapshot(
+							state,
+							effectiveWorkers,
+							start,
+							ProgressPhaseJobStarted,
+							attempt,
+							totalAttempts,
+							job.InputPDF,
+							event,
+							"",
+						)
+						mu.Unlock()
+						emitProgress(opts, snapshot)
+					},
 				})
 
 				var doneSnapshot ProgressSnapshot
@@ -305,6 +328,7 @@ func runJobs(
 					attempt,
 					totalAttempts,
 					job.InputPDF,
+					provider.ProgressEvent{},
 					jobErr,
 				)
 				emitDone = true
@@ -331,6 +355,7 @@ func buildProgressSnapshot(
 	attempt int,
 	totalAttempts int,
 	currentInputPDF string,
+	progress provider.ProgressEvent,
 	currentError string,
 ) ProgressSnapshot {
 	pending, running, succeeded, failed, skipped := countJobStatuses(state.Jobs)
@@ -347,6 +372,10 @@ func buildProgressSnapshot(
 		Skipped:          skipped,
 		EffectiveWorkers: effectiveWorkers,
 		CurrentInputPDF:  currentInputPDF,
+		CurrentStage:     progress.Stage,
+		CurrentPage:      progress.CurrentPage,
+		CompletedPages:   progress.CompletedPages,
+		TotalPages:       progress.TotalPages,
 		CurrentError:     currentError,
 		Elapsed:          time.Since(start),
 	}

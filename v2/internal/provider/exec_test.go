@@ -48,6 +48,32 @@ func TestExecProviderRunFailure(t *testing.T) {
 	}
 }
 
+func TestExecProviderParsesProgressFromStderr(t *testing.T) {
+	temp := t.TempDir()
+	script := filepath.Join(temp, "provider-progress.sh")
+	body := "#!/usr/bin/env bash\nset -euo pipefail\ncat >/dev/null\necho 'OCRPOC_PROGRESS {\"phase\":\"page_done\",\"stage\":\"vision_ocr\",\"current_page\":2,\"completed_pages\":2,\"total_pages\":5}' >&2\ncat <<'JSON'\n{\"searchable_pdf\":\"/tmp/a.pdf\",\"pages_json\":\"/tmp/pages.json\",\"text_path\":\"/tmp/document.txt\",\"markdown_path\":\"/tmp/document.md\"}\nJSON\n"
+	writeExecScript(t, script, body)
+
+	p := &ExecProvider{providerBin: script, displayName: "exec"}
+	events := []ProgressEvent{}
+	_, err := p.Run(context.Background(), Request{
+		InputPDF:  "in.pdf",
+		OutputDir: temp,
+		OnProgress: func(event ProgressEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("exec run failed: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one progress event, got %d", len(events))
+	}
+	if events[0].Stage != "vision_ocr" || events[0].CurrentPage != 2 || events[0].CompletedPages != 2 || events[0].TotalPages != 5 {
+		t.Fatalf("unexpected progress event: %+v", events[0])
+	}
+}
+
 func TestExecProviderLocalOnlyToolingMissing(t *testing.T) {
 	original := checkLocalOnlyToolsFn
 	checkLocalOnlyToolsFn = func() (bool, string) {

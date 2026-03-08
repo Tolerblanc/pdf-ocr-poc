@@ -7,7 +7,8 @@ Current state:
 - Implements Apple Vision OCR (`VNRecognizeTextRequest`) over PDF pages.
 - Writes contract artifacts: `searchable.pdf`, `pages.json`, `document.txt`, `document.md`.
 - Searchable PDF now uses a CoreGraphics text-layer rewrite (no FreeText annotation overlays).
-- `max_workers` is accepted in contract but not yet used for page-level parallel OCR.
+- `max_workers` now controls page-level parallel OCR workers.
+- Provider emits structured progress events so `ocrpoc-go batch` can show per-PDF/per-page progress.
 
 Build:
 

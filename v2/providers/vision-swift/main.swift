@@ -23,6 +23,14 @@ struct Result: Encodable {
     let warnings: [String]
 }
 
+struct ProgressEvent: Encodable {
+    let phase: String
+    let stage: String
+    let current_page: Int?
+    let completed_pages: Int?
+    let total_pages: Int?
+}
+
 struct BBox: Encodable {
     let x0: Double
     let y0: Double
@@ -98,6 +106,14 @@ enum ProviderError: Error {
     case failedToRecognizePage(Int)
 }
 
+extension NSLock {
+    func withLock<T>(_ body: () throws -> T) rethrows -> T {
+        lock()
+        defer { unlock() }
+        return try body()
+    }
+}
+
 let chapterSuffixRegex = try! NSRegularExpression(pattern: "\\b(\\d{1,2})\\s*[\\uAC15\\uC794\\uC815]\\b")
 let restPathRegex = try! NSRegularExpression(pattern: "\\b(GET|POST|PUT|DELETE)\\s+users/(\\d+)", options: [.caseInsensitive])
 let headingRegex = try! NSRegularExpression(pattern: "^(\\d+\\s*\\uC7A5|chapter\\s+\\d+|part\\s+\\d+)", options: [.caseInsensitive])
@@ -112,6 +128,20 @@ func writeFile(path: String, content: Data) throws {
         withIntermediateDirectories: true
     )
     try content.write(to: url)
+}
+
+let progressWriteQueue = DispatchQueue(label: "vision-provider.progress")
+
+func emitProgress(_ event: ProgressEvent) {
+    progressWriteQueue.sync {
+        let encoder = JSONEncoder()
+        guard let payload = try? encoder.encode(event) else {
+            return
+        }
+        FileHandle.standardError.write(Data("OCRPOC_PROGRESS ".utf8))
+        FileHandle.standardError.write(payload)
+        FileHandle.standardError.write(Data("\n".utf8))
+    }
 }
 
 func normalizeVisionText(_ raw: String) -> String {
@@ -309,6 +339,127 @@ func processPage(page: PDFPage, pageNumber: Int, scale: CGFloat) throws -> PageA
     )
 }
 
+func effectiveOCRWorkers(requested: Int, totalPages: Int) -> Int {
+    if totalPages < 1 {
+        return 1
+    }
+    let bounded = max(1, requested)
+    return min(bounded, totalPages)
+}
+
+func processDocumentPages(inputPDF: String, pageCount: Int, scale: CGFloat, maxWorkers: Int) throws -> ([PageArtifact], [String]) {
+    let workerCount = effectiveOCRWorkers(requested: maxWorkers, totalPages: pageCount)
+    let lock = NSLock()
+    var nextIndex = 0
+    var completedPages = 0
+    var firstError: Error?
+    var warnings: [String] = []
+    var artifacts = Array<PageArtifact?>(repeating: nil, count: pageCount)
+    let inputURL = URL(fileURLWithPath: inputPDF)
+
+    emitProgress(
+        ProgressEvent(
+            phase: "document_started",
+            stage: "vision_ocr",
+            current_page: nil,
+            completed_pages: 0,
+            total_pages: pageCount
+        )
+    )
+
+    let group = DispatchGroup()
+    for _ in 0..<workerCount {
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { group.leave() }
+
+            guard let workerDocument = PDFDocument(url: inputURL) else {
+                lock.withLock {
+                    if firstError == nil {
+                        firstError = ProviderError.failedToLoadPDF(inputPDF)
+                    }
+                }
+                return
+            }
+
+            while true {
+                let pageIndex: Int? = lock.withLock {
+                    if firstError != nil || nextIndex >= pageCount {
+                        return nil
+                    }
+                    let assigned = nextIndex
+                    nextIndex += 1
+                    return assigned
+                }
+                guard let idx = pageIndex else {
+                    return
+                }
+
+                emitProgress(
+                    ProgressEvent(
+                        phase: "page_started",
+                        stage: "vision_ocr",
+                        current_page: idx + 1,
+                        completed_pages: lock.withLock { completedPages },
+                        total_pages: pageCount
+                    )
+                )
+
+                autoreleasepool {
+                    guard let page = workerDocument.page(at: idx) else {
+                        lock.withLock {
+                            warnings.append("missing_pdf_page_\(idx + 1)")
+                        }
+                        return
+                    }
+
+                    do {
+                        let artifact = try processPage(page: page, pageNumber: idx + 1, scale: scale)
+                        let completed = lock.withLock { () -> Int in
+                            artifacts[idx] = artifact
+                            completedPages += 1
+                            return completedPages
+                        }
+                        emitProgress(
+                            ProgressEvent(
+                                phase: "page_done",
+                                stage: "vision_ocr",
+                                current_page: idx + 1,
+                                completed_pages: completed,
+                                total_pages: pageCount
+                            )
+                        )
+                    } catch {
+                        lock.withLock {
+                            if firstError == nil {
+                                firstError = error
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    group.wait()
+
+    if let error = firstError {
+        throw error
+    }
+
+    let orderedArtifacts = artifacts.compactMap { $0 }
+    emitProgress(
+        ProgressEvent(
+            phase: "document_done",
+            stage: "vision_ocr",
+            current_page: nil,
+            completed_pages: orderedArtifacts.count,
+            total_pages: pageCount
+        )
+    )
+    return (orderedArtifacts, warnings)
+}
+
 func pdfRect(for block: OCRBlock, artifact: PageArtifact) -> CGRect {
     let imageWidth = Double(max(1, artifact.imageWidth))
     let imageHeight = Double(max(1, artifact.imageHeight))
@@ -501,22 +652,14 @@ func run() throws {
 
     let renderScaleValue = renderScale(for: request.profile)
     let ocrStart = Date()
-    var artifacts: [PageArtifact] = []
-    artifacts.reserveCapacity(document.pageCount)
-
     var warnings: [String] = []
-    if request.max_workers > 1 {
-        warnings.append("max_workers_not_applied_yet_in_swift_provider")
-    }
-
-    for idx in 0..<document.pageCount {
-        guard let page = document.page(at: idx) else {
-            warnings.append("missing_pdf_page_\(idx + 1)")
-            continue
-        }
-        let artifact = try processPage(page: page, pageNumber: idx + 1, scale: renderScaleValue)
-        artifacts.append(artifact)
-    }
+    let (artifacts, ocrWarnings) = try processDocumentPages(
+        inputPDF: request.input_pdf,
+        pageCount: document.pageCount,
+        scale: renderScaleValue,
+        maxWorkers: request.max_workers
+    )
+    warnings.append(contentsOf: ocrWarnings)
     let ocrSeconds = Date().timeIntervalSince(ocrStart)
 
     let pages = artifacts.map { $0.ocrPage }
@@ -528,12 +671,30 @@ func run() throws {
     let searchablePDF = (request.output_dir as NSString).appendingPathComponent("searchable.pdf")
 
     let serializeStart = Date()
+    emitProgress(
+        ProgressEvent(
+            phase: "stage_started",
+            stage: "serialization",
+            current_page: nil,
+            completed_pages: nil,
+            total_pages: document.pageCount
+        )
+    )
     try writeDocument(ocrDocument, to: pagesJSON)
     try writeFile(path: textPath, content: Data((renderText(pages: pages) + "\n").utf8))
     try writeFile(path: markdownPath, content: Data((renderMarkdown(pages: pages).trimmingCharacters(in: .whitespacesAndNewlines) + "\n").utf8))
     let serializeSeconds = Date().timeIntervalSince(serializeStart)
 
     let searchableStart = Date()
+    emitProgress(
+        ProgressEvent(
+            phase: "stage_started",
+            stage: "searchable_pdf",
+            current_page: nil,
+            completed_pages: nil,
+            total_pages: document.pageCount
+        )
+    )
     let (_, searchableWarnings) = buildSearchablePDF(inputPDF: request.input_pdf, outputPDF: searchablePDF, artifacts: artifacts)
     warnings.append(contentsOf: searchableWarnings)
     let searchableSeconds = Date().timeIntervalSince(searchableStart)

@@ -73,6 +73,32 @@ func (p *workersCaptureProvider) Run(_ context.Context, req provider.Request) (p
 	return writeProviderArtifacts(req.OutputDir)
 }
 
+type progressProvider struct{}
+
+func (p *progressProvider) Name() string {
+	return "progress"
+}
+
+func (p *progressProvider) Run(_ context.Context, req provider.Request) (provider.Result, error) {
+	if req.OnProgress != nil {
+		req.OnProgress(provider.ProgressEvent{
+			Phase:          "page_started",
+			Stage:          "vision_ocr",
+			CurrentPage:    1,
+			CompletedPages: 0,
+			TotalPages:     2,
+		})
+		req.OnProgress(provider.ProgressEvent{
+			Phase:          "page_done",
+			Stage:          "vision_ocr",
+			CurrentPage:    1,
+			CompletedPages: 1,
+			TotalPages:     2,
+		})
+	}
+	return writeProviderArtifacts(req.OutputDir)
+}
+
 func writeProviderArtifacts(outDir string) (provider.Result, error) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return provider.Result{}, err
@@ -343,4 +369,43 @@ func TestBatchProgressSnapshots(t *testing.T) {
 	if last.Completed != 2 || last.Succeeded != 2 || last.Total != 2 {
 		t.Fatalf("unexpected final snapshot: %+v", last)
 	}
+}
+
+func TestBatchProgressSnapshotsIncludeProviderPageProgress(t *testing.T) {
+	temp := t.TempDir()
+	inputDir := filepath.Join(temp, "in")
+	writePDF(t, filepath.Join(inputDir, "a.pdf"))
+
+	outDir := filepath.Join(temp, "out")
+	var mu sync.Mutex
+	snapshots := []ProgressSnapshot{}
+	_, err := Run(context.Background(), &progressProvider{}, Options{
+		InputPath:      inputDir,
+		OutputRoot:     outDir,
+		Profile:        "fast",
+		LocalOnly:      true,
+		MaxWorkers:     2,
+		MaxWorkersMode: "manual",
+		Workers:        1,
+		Resume:         false,
+		Recursive:      false,
+		RetryFailed:    0,
+		OnProgress: func(snapshot ProgressSnapshot) {
+			mu.Lock()
+			snapshots = append(snapshots, snapshot)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("batch run failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, snapshot := range snapshots {
+		if snapshot.CurrentStage == "vision_ocr" && snapshot.TotalPages == 2 && snapshot.CurrentPage == 1 && snapshot.CompletedPages == 1 {
+			return
+		}
+	}
+	t.Fatalf("expected provider page progress snapshot, got %+v", snapshots)
 }
