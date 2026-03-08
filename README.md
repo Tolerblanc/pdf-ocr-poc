@@ -2,6 +2,8 @@
 
 Local-only OCR CLI for scanned Korean technical PDFs on Apple Silicon.
 
+Korean README: `README.ko.md`
+
 ## Quick Start (Full Build + First Run)
 
 Requirements:
