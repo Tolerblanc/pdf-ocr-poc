@@ -91,6 +91,7 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 		mode,
 		*localOnly,
 	)
+	renderer := newRunProgressRenderer(stderr, *input)
 
 	output, err := runpkg.Execute(context.Background(), p, runpkg.Options{
 		InputPDF:       *input,
@@ -99,7 +100,9 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 		LocalOnly:      *localOnly,
 		MaxWorkers:     workers,
 		MaxWorkersMode: mode,
+		OnProgress:     renderer.Render,
 	})
+	renderer.Finish()
 	if err != nil {
 		fmt.Fprintf(stderr, "run failed: %v\n", err)
 		return 1

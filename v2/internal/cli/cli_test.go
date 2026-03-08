@@ -9,6 +9,13 @@ import (
 	"testing"
 )
 
+func writeExecScript(t *testing.T, path string, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write script failed: %v", err)
+	}
+}
+
 func writeTestPDF(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -86,6 +93,36 @@ func TestRunCommandManualWorkers(t *testing.T) {
 	}
 	if report["max_workers_mode"] != "manual" {
 		t.Fatalf("expected manual max_workers_mode, got %v", report["max_workers_mode"])
+	}
+}
+
+func TestRunCommandShowsProviderProgress(t *testing.T) {
+	temp := t.TempDir()
+	inputPDF := filepath.Join(temp, "in.pdf")
+	writeTestPDF(t, inputPDF)
+	outDir := filepath.Join(temp, "out")
+	script := filepath.Join(temp, "provider.sh")
+	writeExecScript(t, script, "#!/usr/bin/env bash\nset -euo pipefail\ncat >/dev/null\necho 'OCRPOC_PROGRESS {\"phase\":\"page_done\",\"stage\":\"vision_ocr\",\"current_page\":2,\"completed_pages\":1,\"total_pages\":3}' >&2\ncat <<'JSON'\n{\"searchable_pdf\":\"/tmp/a.pdf\",\"pages_json\":\"/tmp/pages.json\",\"text_path\":\"/tmp/document.txt\",\"markdown_path\":\"/tmp/document.md\"}\nJSON\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Execute([]string{
+		"run",
+		"--input", inputPDF,
+		"--out", outDir,
+		"--provider", "exec",
+		"--provider-bin", script,
+		"--local-only=false",
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d, stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "1/3 pages") {
+		t.Fatalf("expected page progress in stderr, got: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "ocr=in.pdf") {
+		t.Fatalf("expected OCR progress label in stderr, got: %s", stderr.String())
 	}
 }
 

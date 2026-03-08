@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/batch"
+	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/provider"
 )
 
 func TestRenderProgressBarBoundaries(t *testing.T) {
@@ -72,5 +73,33 @@ func TestBatchProgressRendererShowsCurrentPDF(t *testing.T) {
 	}
 	if !strings.Contains(printed, "pdf/s") {
 		t.Fatalf("expected pdf throughput label, got: %q", printed)
+	}
+}
+
+func TestRunProgressRendererShowsPageProgress(t *testing.T) {
+	var out bytes.Buffer
+	renderer := newRunProgressRenderer(&out, "/tmp/contracts/a.pdf")
+	renderer.Render(provider.ProgressEvent{
+		Stage:          "vision_ocr",
+		CurrentPage:    2,
+		CompletedPages: 1,
+		TotalPages:     3,
+	})
+
+	printed := out.String()
+	if !strings.Contains(printed, "1/3 pages") {
+		t.Fatalf("expected page counter in output, got: %q", printed)
+	}
+	if !strings.Contains(printed, "ocr=a.pdf") {
+		t.Fatalf("expected stage and pdf name in output, got: %q", printed)
+	}
+	if !strings.Contains(printed, "(p2)") {
+		t.Fatalf("expected current page marker in output, got: %q", printed)
+	}
+	if !strings.Contains(printed, "pages/s") {
+		t.Fatalf("expected pages throughput label, got: %q", printed)
+	}
+	if !strings.HasPrefix(printed, "\r[") {
+		t.Fatalf("expected progress bar prefix, got: %q", printed)
 	}
 }

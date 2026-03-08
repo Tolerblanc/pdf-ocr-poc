@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/batch"
+	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/provider"
 )
 
 type batchProgressRenderer struct {
@@ -22,12 +23,29 @@ type batchProgressRenderer struct {
 	lastPDF                  string
 }
 
+type runProgressRenderer struct {
+	mu        sync.Mutex
+	w         io.Writer
+	lastLen   int
+	inputPDF  string
+	start     time.Time
+	lastStage string
+}
+
 const maxWorkersNotAppliedWarning = "max_workers_not_applied_yet_in_swift_provider"
 
 func newBatchProgressRenderer(w io.Writer) *batchProgressRenderer {
 	return &batchProgressRenderer{
 		w:         w,
 		activeSet: make(map[string]struct{}),
+	}
+}
+
+func newRunProgressRenderer(w io.Writer, inputPDF string) *runProgressRenderer {
+	return &runProgressRenderer{
+		w:        w,
+		inputPDF: filepath.Base(inputPDF),
+		start:    time.Now(),
 	}
 }
 
@@ -170,6 +188,59 @@ func (r *batchProgressRenderer) Finish() {
 	r.finishLocked()
 }
 
+func (r *runProgressRenderer) Render(event provider.ProgressEvent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	stage := displayStageName(event.Stage)
+	if stage == "" {
+		stage = "run"
+	}
+	r.lastStage = stage
+
+	elapsed := time.Since(r.start)
+	line := fmt.Sprintf("%s=%s | elapsed=%s", stage, r.inputPDF, formatDuration(elapsed))
+	if event.Stage == "vision_ocr" && event.TotalPages > 0 {
+		percent := (float64(event.CompletedPages) / float64(event.TotalPages)) * 100
+		rate := 0.0
+		if elapsed > 0 {
+			rate = float64(event.CompletedPages) / elapsed.Seconds()
+		}
+		eta := "--:--"
+		if rate > 0 && event.CompletedPages < event.TotalPages {
+			remaining := float64(event.TotalPages-event.CompletedPages) / rate
+			eta = formatDuration(time.Duration(remaining * float64(time.Second)))
+		}
+		line = fmt.Sprintf(
+			"%s %6.2f%% %d/%d pages | %.2f pages/s | elapsed=%s eta=%s | %s=%s",
+			renderProgressBar(event.CompletedPages, event.TotalPages, 24),
+			percent,
+			event.CompletedPages,
+			event.TotalPages,
+			rate,
+			formatDuration(elapsed),
+			eta,
+			stage,
+			r.inputPDF,
+		)
+		if event.CurrentPage > 0 {
+			line += fmt.Sprintf(" (p%d)", event.CurrentPage)
+		}
+	}
+
+	r.writeLocked(line, false)
+}
+
+func (r *runProgressRenderer) Finish() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lastLen == 0 {
+		return
+	}
+	_, _ = fmt.Fprintln(r.w)
+	r.lastLen = 0
+}
+
 func (r *batchProgressRenderer) finishLocked() {
 	if r.lastLen == 0 {
 		return
@@ -179,6 +250,22 @@ func (r *batchProgressRenderer) finishLocked() {
 }
 
 func (r *batchProgressRenderer) write(line string, done bool) {
+	r.writeLocked(line, done)
+}
+
+func (r *batchProgressRenderer) writeLocked(line string, done bool) {
+	if len(line) < r.lastLen {
+		line += strings.Repeat(" ", r.lastLen-len(line))
+	}
+	_, _ = fmt.Fprintf(r.w, "\r%s", line)
+	r.lastLen = len(line)
+	if done {
+		_, _ = fmt.Fprintln(r.w)
+		r.lastLen = 0
+	}
+}
+
+func (r *runProgressRenderer) writeLocked(line string, done bool) {
 	if len(line) < r.lastLen {
 		line += strings.Repeat(" ", r.lastLen-len(line))
 	}
