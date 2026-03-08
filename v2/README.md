@@ -125,6 +125,17 @@ The validator checks page count, non-blank extraction coverage, and per-page lin
 - The config file can select a named profile, resolve shared credentials via `auth_ref`, and override runtime settings like `output_mode`.
 - `runtime.allow_remote=false` in the config still blocks remote postprocess providers even if the CLI flag is enabled.
 - `output_mode=primary_artifacts` keeps `corrected_pages.json` sidecars and also regenerates `pages.json`, `document.txt`, `document.md`, and `searchable.pdf` from the corrected result.
+- The repo ships `postprocess.example.json` as a pre-tuned Codex sweet-spot profile.
+
+Bootstrap a local config from the template:
+
+```bash
+cp ../postprocess.example.json ../postprocess.json
+```
+
+- The default credential points at the OpenCode auth store: `~/.local/share/opencode/auth.json`.
+- If your auth file is elsewhere, edit `credentials.openai.file` in `postprocess.json`.
+- If you prefer env-based OAuth tokens, change the credential `kind` to `env_oauth_access_token` and set `OCRPOC_POSTPROCESS_CODEX_ACCESS_TOKEN` plus optional `OCRPOC_POSTPROCESS_CODEX_REFRESH_TOKEN` and `OCRPOC_POSTPROCESS_CODEX_ACCOUNT_ID`.
 
 Example with local OCR plus remote postprocess:
 

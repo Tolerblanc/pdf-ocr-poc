@@ -40,6 +40,17 @@ make quickstart \
   QUICKSTART_POSTPROCESS_ALLOW_REMOTE=true
 ```
 
+로컬 후보정 설정 파일은 이렇게 시작하면 됩니다:
+
+```bash
+cp ./postprocess.example.json ./postprocess.json
+```
+
+- `postprocess.example.json`은 레포에 포함된 Codex 후보정용 스윗스팟 프로필입니다.
+- 기본값은 OpenCode 인증 저장소 `~/.local/share/opencode/auth.json`을 사용합니다.
+- 인증 파일 경로가 다르면 `postprocess.json`의 `credentials.openai.file` 값을 수정하면 됩니다.
+- 환경 변수 기반 OAuth 토큰을 쓰고 싶다면 credential `kind`를 `env_oauth_access_token`으로 바꾸고 `OCRPOC_POSTPROCESS_CODEX_ACCESS_TOKEN`과 필요 시 `OCRPOC_POSTPROCESS_CODEX_REFRESH_TOKEN`, `OCRPOC_POSTPROCESS_CODEX_ACCOUNT_ID`를 설정하면 됩니다.
+
 직접 단계별로 실행하려면 저장소 루트에서:
 
 ```bash

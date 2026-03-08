@@ -1,0 +1,31 @@
+{
+  "version": "v1alpha1",
+  "credentials": {
+    "openai": {
+      "kind": "oauth_store_file",
+      "file": "~/.local/share/opencode/auth.json",
+      "provider_id": "openai"
+    }
+  },
+  "providers": {
+    "default": {
+      "provider": "codex-headless-oauth",
+      "auth_ref": "openai",
+      "model": "gpt-5.3-codex",
+      "timeout_seconds": 120,
+      "page_batch_size": 1,
+      "output_mode": "primary_artifacts",
+      "guard": {
+        "max_edit_distance_ratio": 0.35,
+        "protect_numbers": true,
+        "protect_urls": true,
+        "protect_code_blocks": true,
+        "emit_page_diff": true
+      }
+    }
+  },
+  "runtime": {
+    "profile": "default",
+    "allow_remote": true
+  }
+}

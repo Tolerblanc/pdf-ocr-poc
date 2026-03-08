@@ -40,6 +40,17 @@ make quickstart \
   QUICKSTART_POSTPROCESS_ALLOW_REMOTE=true
 ```
 
+Bootstrap a local postprocess config:
+
+```bash
+cp ./postprocess.example.json ./postprocess.json
+```
+
+- `postprocess.example.json` is the repo's pre-tuned Codex sweet-spot profile.
+- By default it expects the OpenCode auth store at `~/.local/share/opencode/auth.json`.
+- If your auth file lives elsewhere, edit `credentials.openai.file` in `postprocess.json`.
+- If you prefer env-based OAuth tokens, change the credential `kind` to `env_oauth_access_token` and set `OCRPOC_POSTPROCESS_CODEX_ACCESS_TOKEN` plus optional `OCRPOC_POSTPROCESS_CODEX_REFRESH_TOKEN` and `OCRPOC_POSTPROCESS_CODEX_ACCOUNT_ID`.
+
 If you prefer the manual flow from repository root:
 
 ```bash
