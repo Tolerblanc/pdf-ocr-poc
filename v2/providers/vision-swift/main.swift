@@ -2,9 +2,7 @@ import Foundation
 import PDFKit
 import Vision
 import CoreGraphics
-#if canImport(AppKit)
-import AppKit
-#endif
+import CoreText
 
 struct Request: Decodable {
     let input_pdf: String
@@ -163,45 +161,6 @@ func classifyBlock(_ text: String) -> String {
     return "paragraph"
 }
 
-func closeJSONBlocksIfNeeded(_ blocks: [OCRBlock]) -> [OCRBlock] {
-    let codeBlocks = blocks.filter { $0.blockType == "code" }
-    if codeBlocks.isEmpty {
-        return blocks
-    }
-
-    let joined = codeBlocks.map { $0.text }.joined(separator: "\n")
-    let hasJSONContext = joined.contains("\"id\"") || joined.contains("\"address\"") || joined.contains("GET /users/")
-    if !hasJSONContext {
-        return blocks
-    }
-
-    let openCount = joined.filter { $0 == "{" }.count
-    let closeCount = joined.filter { $0 == "}" }.count
-    if openCount <= closeCount {
-        return blocks
-    }
-
-    var fixed = blocks
-    let missing = openCount - closeCount
-    guard let maxOrder = blocks.map({ $0.readingOrder }).max() else {
-        return blocks
-    }
-    let baseOrder = maxOrder
-    for offset in 0..<missing {
-        fixed.append(
-            OCRBlock(
-                text: "}",
-                bbox: BBox(x0: 0, y0: 0, x1: 0, y1: 0),
-                blockType: "code",
-                confidence: 0,
-                readingOrder: baseOrder + offset + 1
-            )
-        )
-    }
-
-    return fixed
-}
-
 func renderScale(for profile: String) -> CGFloat {
     switch profile.lowercased() {
     case "quality":
@@ -239,8 +198,9 @@ func renderPageImage(page: PDFPage, scale: CGFloat, pageNumber: Int) throws -> C
     context.fill(CGRect(x: 0, y: 0, width: CGFloat(pixelWidth), height: CGFloat(pixelHeight)))
 
     context.saveGState()
-    context.translateBy(x: 0, y: CGFloat(pixelHeight))
-    context.scaleBy(x: scale, y: -scale)
+    let drawRect = CGRect(x: 0, y: 0, width: CGFloat(pixelWidth), height: CGFloat(pixelHeight))
+    let transform = pageRef.getDrawingTransform(.mediaBox, rect: drawRect, rotate: 0, preserveAspectRatio: true)
+    context.concatenate(transform)
     context.drawPDFPage(pageRef)
     context.restoreGState()
 
@@ -253,8 +213,15 @@ func renderPageImage(page: PDFPage, scale: CGFloat, pageNumber: Int) throws -> C
 func recognizeLines(cgImage: CGImage, pageNumber: Int) throws -> [RecognizedLine] {
     let request = VNRecognizeTextRequest()
     request.recognitionLevel = .accurate
-    request.usesLanguageCorrection = true
-    request.recognitionLanguages = ["ko-KR", "en-US"]
+    request.usesLanguageCorrection = false
+
+    let preferredLanguages = ["ko-KR", "ko", "en-US", "en-GB", "en"]
+    if let supported = try? request.supportedRecognitionLanguages() {
+        let selected = preferredLanguages.filter { supported.contains($0) }
+        if !selected.isEmpty {
+            request.recognitionLanguages = selected
+        }
+    }
 
     let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
     do {
@@ -321,8 +288,7 @@ func processPage(page: PDFPage, pageNumber: Int, scale: CGFloat) throws -> PageA
         )
     }
 
-    let fixedBlocks = closeJSONBlocksIfNeeded(blocks)
-    let pageText = fixedBlocks.map { $0.text }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    let pageText = blocks.map { $0.text }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     let bounds = page.bounds(for: .mediaBox)
 
     let ocrPage = OCRPage(
@@ -331,7 +297,7 @@ func processPage(page: PDFPage, pageNumber: Int, scale: CGFloat) throws -> PageA
         height: cgImage.height,
         isBlank: pageText.isEmpty,
         text: pageText,
-        blocks: fixedBlocks
+        blocks: blocks
     )
 
     return PageArtifact(
@@ -361,58 +327,116 @@ func pdfRect(for block: OCRBlock, artifact: PageArtifact) -> CGRect {
     return CGRect(x: pdfX, y: pdfY, width: pdfW, height: pdfH)
 }
 
+func drawInvisibleText(_ text: String, in rect: CGRect, context: CGContext) {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty || rect.width < 1 || rect.height < 1 {
+        return
+    }
+
+    let fontSize = max(6, min(24, rect.height * 0.9))
+    let font = CTFontCreateWithName("AppleSDGothicNeo-Regular" as CFString, fontSize, nil)
+    let attributes: [NSAttributedString.Key: Any] = [
+        NSAttributedString.Key(kCTFontAttributeName as String): font,
+    ]
+    let attributed = NSAttributedString(string: trimmed, attributes: attributes)
+    let line = CTLineCreateWithAttributedString(attributed)
+
+    context.saveGState()
+    context.textMatrix = .identity
+    context.setTextDrawingMode(.fill)
+    context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.002))
+    let baselineY = rect.minY + max(0, (rect.height - fontSize) * 0.5)
+    context.textPosition = CGPoint(x: rect.minX, y: baselineY)
+    CTLineDraw(line, context)
+    context.restoreGState()
+}
+
+func copySearchablePDFFallback(inputPDF: String, outputPDF: String, warnings: [String]) -> (String, [String]) {
+    var nextWarnings = warnings
+    do {
+        if FileManager.default.fileExists(atPath: outputPDF) {
+            try FileManager.default.removeItem(atPath: outputPDF)
+        }
+        try FileManager.default.copyItem(atPath: inputPDF, toPath: outputPDF)
+        nextWarnings.append("searchable_pdf_method=copy-fallback")
+        return ("copy-fallback", nextWarnings)
+    } catch {
+        nextWarnings.append("searchable_pdf_write_failed")
+        return ("none", nextWarnings)
+    }
+}
+
 func buildSearchablePDF(inputPDF: String, outputPDF: String, artifacts: [PageArtifact]) -> (String, [String]) {
-    guard let doc = PDFDocument(url: URL(fileURLWithPath: inputPDF)) else {
-        return ("copy-fallback", ["failed_to_open_input_pdf_for_overlay"])
+    guard let sourceURL = CFURLCreateWithFileSystemPath(nil, inputPDF as CFString, .cfurlposixPathStyle, false),
+          let source = CGPDFDocument(sourceURL)
+    else {
+        return copySearchablePDFFallback(
+            inputPDF: inputPDF,
+            outputPDF: outputPDF,
+            warnings: ["failed_to_open_input_pdf_for_text_layer"]
+        )
+    }
+
+    if FileManager.default.fileExists(atPath: outputPDF) {
+        do {
+            try FileManager.default.removeItem(atPath: outputPDF)
+        } catch {
+            return copySearchablePDFFallback(
+                inputPDF: inputPDF,
+                outputPDF: outputPDF,
+                warnings: ["failed_to_prepare_output_pdf"]
+            )
+        }
+    }
+
+    guard let outputURL = CFURLCreateWithFileSystemPath(nil, outputPDF as CFString, .cfurlposixPathStyle, false),
+          let context = CGContext(outputURL, mediaBox: nil, nil)
+    else {
+        return copySearchablePDFFallback(
+            inputPDF: inputPDF,
+            outputPDF: outputPDF,
+            warnings: ["failed_to_create_output_pdf_context"]
+        )
     }
 
     var warnings: [String] = []
     for artifact in artifacts {
-        guard let page = doc.page(at: artifact.index) else {
-            warnings.append("missing_page_for_overlay_\(artifact.index + 1)")
+        let pageNumber = artifact.index + 1
+        guard let page = source.page(at: pageNumber) else {
+            warnings.append("missing_page_for_text_layer_\(pageNumber)")
             continue
         }
+
+        var mediaBox = page.getBoxRect(.mediaBox)
+        if mediaBox.isEmpty {
+            mediaBox = artifact.pageBounds
+        }
+
+        context.beginPDFPage([
+            kCGPDFContextMediaBox: mediaBox,
+        ] as CFDictionary)
+        context.drawPDFPage(page)
 
         for block in artifact.ocrPage.blocks {
             let trimmed = block.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
                 continue
             }
-
             let rect = pdfRect(for: block, artifact: artifact)
-            let annotation = PDFAnnotation(bounds: rect, forType: .freeText, withProperties: nil)
-            annotation.contents = trimmed
-#if canImport(AppKit)
-            annotation.font = NSFont.systemFont(ofSize: max(6, min(18, rect.height * 0.9)))
-            annotation.fontColor = NSColor.clear
-            annotation.color = NSColor.clear
-#endif
-            let border = PDFBorder()
-            border.lineWidth = 0
-            annotation.border = border
-            annotation.shouldPrint = false
-            page.addAnnotation(annotation)
+            drawInvisibleText(trimmed, in: rect, context: context)
         }
+
+        context.endPDFPage()
     }
 
-    let outputURL = URL(fileURLWithPath: outputPDF)
-    if doc.write(to: outputURL) {
-        warnings.append("searchable_pdf_method=pdfkit-annotation-overlay")
-        return ("pdfkit-annotation-overlay", warnings)
+    context.closePDF()
+    if !FileManager.default.fileExists(atPath: outputPDF) {
+        warnings.append("searchable_pdf_text_layer_write_missing")
+        return copySearchablePDFFallback(inputPDF: inputPDF, outputPDF: outputPDF, warnings: warnings)
     }
+    warnings.append("searchable_pdf_method=coregraphics-invisible-text-layer")
+    return ("coregraphics-invisible-text-layer", warnings)
 
-    do {
-        if FileManager.default.fileExists(atPath: outputPDF) {
-            try FileManager.default.removeItem(atPath: outputPDF)
-        }
-        try FileManager.default.copyItem(atPath: inputPDF, toPath: outputPDF)
-        warnings.append("searchable_pdf_method=copy-fallback")
-        warnings.append("searchable_pdf_overlay_failed")
-        return ("copy-fallback", warnings)
-    } catch {
-        warnings.append("searchable_pdf_write_failed")
-        return ("none", warnings)
-    }
 }
 
 func writeDocument(_ document: OCRDocument, to path: String) throws {
