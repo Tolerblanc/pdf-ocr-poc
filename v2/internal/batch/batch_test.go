@@ -411,7 +411,7 @@ func TestBatchProgressSnapshotsIncludeProviderPageProgress(t *testing.T) {
 	t.Fatalf("expected provider page progress snapshot, got %+v", snapshots)
 }
 
-func TestBatchFailsFastForRemotePostprocessInLocalOnlyMode(t *testing.T) {
+func TestBatchFailsFastWhenRemotePostprocessIsNotAllowed(t *testing.T) {
 	temp := t.TempDir()
 	inputDir := filepath.Join(temp, "in")
 	writePDF(t, filepath.Join(inputDir, "a.pdf"))

@@ -118,7 +118,7 @@ func TestRunCommandShowsProviderProgress(t *testing.T) {
 		"--out", outDir,
 		"--provider", "exec",
 		"--provider-bin", script,
-		"--local-only=false",
+		"--ocr-local-only=false",
 	}, &stdout, &stderr)
 
 	if code != 0 {

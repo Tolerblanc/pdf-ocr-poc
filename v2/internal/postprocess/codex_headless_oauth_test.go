@@ -16,14 +16,14 @@ import (
 	"time"
 )
 
-func TestCodexHeadlessOAuthProviderRejectsLocalOnly(t *testing.T) {
+func TestCodexHeadlessOAuthProviderRejectsRemoteDisallowed(t *testing.T) {
 	p := newCodexHeadlessOAuthProvider()
 	_, err := p.Run(context.Background(), ProviderRequest{
-		Document:  testCodexDocument(),
-		LocalOnly: true,
+		Document:    testCodexDocument(),
+		AllowRemote: false,
 	})
-	if err == nil || !strings.Contains(err.Error(), "--local-only=false") {
-		t.Fatalf("expected local-only rejection, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "--postprocess-allow-remote") {
+		t.Fatalf("expected remote-disallowed rejection, got %v", err)
 	}
 }
 
@@ -98,7 +98,8 @@ func TestCodexHeadlessOAuthProviderUsesOpencodeAuthFileAndRefreshes(t *testing.T
 	}
 
 	result, err := p.Run(context.Background(), ProviderRequest{
-		Document: testCodexDocument(),
+		Document:    testCodexDocument(),
+		AllowRemote: true,
 		Config: Config{
 			BaseURL:   server.URL + "/backend-api/codex/responses",
 			IssuerURL: server.URL,
@@ -207,7 +208,8 @@ func TestCodexHeadlessOAuthProviderPerformsHeadlessDeviceAuth(t *testing.T) {
 	}
 
 	result, err := p.Run(context.Background(), ProviderRequest{
-		Document: testCodexDocument(),
+		Document:    testCodexDocument(),
+		AllowRemote: true,
 		Config: Config{
 			BaseURL:   server.URL + "/backend-api/codex/responses",
 			IssuerURL: server.URL,

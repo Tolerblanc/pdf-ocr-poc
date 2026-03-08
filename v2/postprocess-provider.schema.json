@@ -237,7 +237,7 @@
       "required": [
         "document",
         "provider",
-        "local_only"
+        "allow_remote"
       ],
       "properties": {
         "document": {
@@ -247,7 +247,7 @@
           "$ref": "#/definitions/provider_profile"
         },
         "profile": { "type": "string" },
-        "local_only": { "type": "boolean" },
+        "allow_remote": { "type": "boolean" },
         "request_source": { "type": "string" }
       },
       "additionalProperties": false

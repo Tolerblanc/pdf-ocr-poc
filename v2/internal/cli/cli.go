@@ -68,8 +68,14 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 		"",
 		"postprocess config file path (defaults to OCRPOC_POSTPROCESS_CONFIG)",
 	)
+	postprocessAllowRemote := fs.Bool(
+		"postprocess-allow-remote",
+		false,
+		"allow postprocess providers that require remote access",
+	)
 	maxWorkers := fs.Int("max-workers", 0, "optional manual worker override")
-	localOnly := fs.Bool("local-only", true, "enable local-only mode")
+	ocrLocalOnly := fs.Bool("ocr-local-only", true, "enforce local-only mode for the OCR provider")
+	fs.BoolVar(ocrLocalOnly, "local-only", true, "deprecated alias for --ocr-local-only")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -96,25 +102,27 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(
 		stderr,
-		"run config: provider=%s postprocess=%s max-workers=%d mode=%s local-only=%t\n",
+		"run config: provider=%s postprocess=%s max-workers=%d mode=%s ocr-local-only=%t postprocess-allow-remote=%t\n",
 		p.Name(),
 		displayPostprocessProvider(*postprocessProvider),
 		workers,
 		mode,
-		*localOnly,
+		*ocrLocalOnly,
+		*postprocessAllowRemote,
 	)
 	renderer := newRunProgressRenderer(stderr, *input)
 
 	output, err := runpkg.Execute(context.Background(), p, runpkg.Options{
-		InputPDF:              *input,
-		OutputDir:             *out,
-		Profile:               *profile,
-		LocalOnly:             *localOnly,
-		MaxWorkers:            workers,
-		MaxWorkersMode:        mode,
-		PostprocessProvider:   *postprocessProvider,
-		PostprocessConfigPath: *postprocessConfig,
-		OnProgress:            renderer.Render,
+		InputPDF:               *input,
+		OutputDir:              *out,
+		Profile:                *profile,
+		LocalOnly:              *ocrLocalOnly,
+		PostprocessAllowRemote: *postprocessAllowRemote,
+		MaxWorkers:             workers,
+		MaxWorkersMode:         mode,
+		PostprocessProvider:    *postprocessProvider,
+		PostprocessConfigPath:  *postprocessConfig,
+		OnProgress:             renderer.Render,
 	})
 	renderer.Finish()
 	if err != nil {
@@ -156,12 +164,18 @@ func batchCommand(args []string, stdout, stderr io.Writer) int {
 		"",
 		"postprocess config file path (defaults to OCRPOC_POSTPROCESS_CONFIG)",
 	)
+	postprocessAllowRemote := fs.Bool(
+		"postprocess-allow-remote",
+		false,
+		"allow postprocess providers that require remote access",
+	)
 	workers := fs.Int("workers", 1, "number of concurrent PDF jobs")
 	maxWorkers := fs.Int("max-workers", 0, "optional manual worker override")
 	resume := fs.Bool("resume", true, "resume from batch_state.json when present")
 	recursive := fs.Bool("recursive", false, "scan input directory recursively")
 	retryFailed := fs.Int("retry-failed", 1, "retry failed jobs at end")
-	localOnly := fs.Bool("local-only", true, "enable local-only mode")
+	ocrLocalOnly := fs.Bool("ocr-local-only", true, "enforce local-only mode for the OCR provider")
+	fs.BoolVar(ocrLocalOnly, "local-only", true, "deprecated alias for --ocr-local-only")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -191,31 +205,33 @@ func batchCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(
 		stderr,
-		"batch config: provider=%s postprocess=%s workers=%d max-workers=%d mode=%s local-only=%t\n",
+		"batch config: provider=%s postprocess=%s workers=%d max-workers=%d mode=%s ocr-local-only=%t postprocess-allow-remote=%t\n",
 		p.Name(),
 		displayPostprocessProvider(*postprocessProvider),
 		*workers,
 		resolvedMaxWorkers,
 		mode,
-		*localOnly,
+		*ocrLocalOnly,
+		*postprocessAllowRemote,
 	)
 	renderer := newBatchProgressRenderer(stderr)
 	defer renderer.Finish()
 
 	report, err := batch.Run(context.Background(), p, batch.Options{
-		InputPath:             *input,
-		OutputRoot:            *out,
-		Profile:               *profile,
-		LocalOnly:             *localOnly,
-		MaxWorkers:            resolvedMaxWorkers,
-		MaxWorkersMode:        mode,
-		PostprocessProvider:   *postprocessProvider,
-		PostprocessConfigPath: *postprocessConfig,
-		Workers:               *workers,
-		Recursive:             *recursive,
-		Resume:                *resume,
-		RetryFailed:           *retryFailed,
-		OnProgress:            renderer.Render,
+		InputPath:              *input,
+		OutputRoot:             *out,
+		Profile:                *profile,
+		LocalOnly:              *ocrLocalOnly,
+		PostprocessAllowRemote: *postprocessAllowRemote,
+		MaxWorkers:             resolvedMaxWorkers,
+		MaxWorkersMode:         mode,
+		PostprocessProvider:    *postprocessProvider,
+		PostprocessConfigPath:  *postprocessConfig,
+		Workers:                *workers,
+		Recursive:              *recursive,
+		Resume:                 *resume,
+		RetryFailed:            *retryFailed,
+		OnProgress:             renderer.Render,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "batch failed: %v\n", err)

@@ -211,13 +211,14 @@ func TestExecuteResolvesPostprocessConfigAndPrimaryArtifacts(t *testing.T) {
 
 	outDir := filepath.Join(temp, "out")
 	output, err := Execute(context.Background(), &provider.MockProvider{}, Options{
-		InputPDF:              inputPDF,
-		OutputDir:             outDir,
-		Profile:               "fast",
-		LocalOnly:             false,
-		MaxWorkers:            2,
-		MaxWorkersMode:        "manual",
-		PostprocessConfigPath: configPath,
+		InputPDF:               inputPDF,
+		OutputDir:              outDir,
+		Profile:                "fast",
+		LocalOnly:              false,
+		PostprocessAllowRemote: false,
+		MaxWorkers:             2,
+		MaxWorkersMode:         "manual",
+		PostprocessConfigPath:  configPath,
 	})
 	if err != nil {
 		t.Fatalf("execute failed: %v", err)
@@ -368,7 +369,7 @@ func TestExecuteFailsOnLocalOnlyViolation(t *testing.T) {
 	}
 }
 
-func TestExecuteFailsFastForRemotePostprocessInLocalOnlyMode(t *testing.T) {
+func TestExecuteFailsFastWhenRemotePostprocessIsNotAllowed(t *testing.T) {
 	temp := t.TempDir()
 	inputPDF := filepath.Join(temp, "in.pdf")
 	if err := os.WriteFile(inputPDF, []byte("%PDF-1.4\n"), 0o644); err != nil {
@@ -390,5 +391,56 @@ func TestExecuteFailsFastForRemotePostprocessInLocalOnlyMode(t *testing.T) {
 	}
 	if stub.calls != 0 {
 		t.Fatalf("expected OCR provider to be skipped, got %d calls", stub.calls)
+	}
+}
+
+func TestExecuteAllowsRemotePostprocessWhileKeepingOCRLocalOnly(t *testing.T) {
+	temp := t.TempDir()
+	inputPDF := filepath.Join(temp, "in.pdf")
+	if err := os.WriteFile(inputPDF, []byte("%PDF-1.4\n"), 0o644); err != nil {
+		t.Fatalf("write input failed: %v", err)
+	}
+
+	outDir := filepath.Join(temp, "out")
+	stub := &runStubProvider{result: provider.Result{
+		MonitorSamples:            4,
+		MonitorDurationSeconds:    1.25,
+		LocalOnlySelfcheckSet:     true,
+		LocalOnlySelfcheckOK:      true,
+		LocalOnlySelfcheckMessage: "monitor active",
+	}}
+	_, err := Execute(context.Background(), stub, Options{
+		InputPDF:               inputPDF,
+		OutputDir:              outDir,
+		Profile:                "fast",
+		LocalOnly:              true,
+		PostprocessAllowRemote: true,
+		MaxWorkers:             1,
+		MaxWorkersMode:         "manual",
+		PostprocessProvider:    postprocess.ProviderCloudLLM,
+	})
+	if err == nil {
+		t.Fatalf("expected unimplemented remote postprocess error")
+	}
+	if !strings.Contains(err.Error(), "not implemented yet") {
+		t.Fatalf("expected remote postprocess execution error, got %v", err)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected OCR provider to run once, got %d calls", stub.calls)
+	}
+
+	body, readErr := os.ReadFile(filepath.Join(outDir, "local_only_report.json"))
+	if readErr != nil {
+		t.Fatalf("expected local_only_report to be written before postprocess failure, got err=%v", readErr)
+	}
+	report := map[string]any{}
+	if parseErr := json.Unmarshal(body, &report); parseErr != nil {
+		t.Fatalf("parse report failed: %v", parseErr)
+	}
+	if report["scope"] != "ocr_provider" {
+		t.Fatalf("expected OCR-scoped local-only report, got %+v", report)
+	}
+	if report["ocr_local_only_mode"] != true {
+		t.Fatalf("expected ocr_local_only_mode=true, got %v", report["ocr_local_only_mode"])
 	}
 }

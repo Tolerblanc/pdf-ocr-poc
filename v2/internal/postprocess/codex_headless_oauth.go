@@ -169,9 +169,9 @@ func (p *codexHeadlessOAuthProvider) Name() string {
 }
 
 func (p *codexHeadlessOAuthProvider) Run(ctx context.Context, req ProviderRequest) (ProviderResult, error) {
-	if req.LocalOnly {
+	if !req.AllowRemote {
 		return ProviderResult{}, fmt.Errorf(
-			"postprocess provider %s requires remote access; run with --local-only=false",
+			"postprocess provider %s requires remote access; rerun with --postprocess-allow-remote",
 			ProviderCodexHeadlessOAuth,
 		)
 	}

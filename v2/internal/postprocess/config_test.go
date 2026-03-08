@@ -3,6 +3,7 @@ package postprocess
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -126,5 +127,36 @@ func TestResolveConfigPreservesExplicitZeroTemperatureOverride(t *testing.T) {
 	}
 	if resolved.Temperature == nil || *resolved.Temperature != 0 {
 		t.Fatalf("expected zero temperature override, got %v", resolved.Temperature)
+	}
+}
+
+func TestValidateExecutionAllowsRemoteWhenExplicitlyEnabled(t *testing.T) {
+	err := ValidateExecution(ResolvedConfig{Config: Config{Provider: ProviderCodexHeadlessOAuth}}, true)
+	if err != nil {
+		t.Fatalf("expected remote postprocess to be allowed, got %v", err)
+	}
+}
+
+func TestValidateExecutionRejectsRemoteWhenCLIFlagDisallowsIt(t *testing.T) {
+	err := ValidateExecution(ResolvedConfig{Config: Config{Provider: ProviderCodexHeadlessOAuth}}, false)
+	if err == nil {
+		t.Fatalf("expected remote postprocess rejection")
+	}
+	if got := err.Error(); got == "" || !strings.Contains(got, "--postprocess-allow-remote") {
+		t.Fatalf("expected flag guidance, got %v", err)
+	}
+}
+
+func TestValidateExecutionRejectsRemoteWhenConfigDisallowsIt(t *testing.T) {
+	allowRemote := false
+	err := ValidateExecution(ResolvedConfig{
+		AllowRemote: &allowRemote,
+		Config:      Config{Provider: ProviderCodexHeadlessOAuth},
+	}, true)
+	if err == nil {
+		t.Fatalf("expected config-level remote postprocess rejection")
+	}
+	if got := err.Error(); got == "" || !strings.Contains(got, "config forbids") {
+		t.Fatalf("expected config rejection, got %v", err)
 	}
 }

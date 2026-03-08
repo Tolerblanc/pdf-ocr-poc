@@ -106,7 +106,7 @@ type Request struct {
 	OCRProvider string
 	OCRResult   provider.Result
 	Config      Config
-	LocalOnly   bool
+	AllowRemote bool
 	OnProgress  provider.ProgressHandler
 }
 
@@ -128,9 +128,9 @@ type Provider interface {
 }
 
 type ProviderRequest struct {
-	Document  Document
-	Config    Config
-	LocalOnly bool
+	Document    Document
+	Config      Config
+	AllowRemote bool
 }
 
 type ProviderResult struct {
@@ -299,9 +299,9 @@ func (p *unimplementedProvider) Name() string {
 }
 
 func (p *unimplementedProvider) Run(_ context.Context, req ProviderRequest) (ProviderResult, error) {
-	if req.LocalOnly && (p.name == ProviderCloudLLM || p.name == ProviderCodexHeadlessOAuth) {
+	if !req.AllowRemote && providerRequiresRemote(p.name) {
 		return ProviderResult{}, fmt.Errorf(
-			"postprocess provider %s is not allowed when local-only mode is enabled",
+			"postprocess provider %s requires remote access; rerun with --postprocess-allow-remote",
 			p.name,
 		)
 	}
@@ -341,9 +341,9 @@ func Execute(ctx context.Context, p Provider, req Request) (Output, error) {
 	}
 
 	result, err := p.Run(ctx, ProviderRequest{
-		Document:  base,
-		Config:    req.Config,
-		LocalOnly: req.LocalOnly,
+		Document:    base,
+		Config:      req.Config,
+		AllowRemote: req.AllowRemote,
 	})
 	if err != nil {
 		return Output{}, err

@@ -73,12 +73,15 @@ func validateResolvedConfig(config Config) error {
 	return nil
 }
 
-func ValidateExecution(resolved ResolvedConfig, localOnly bool) error {
+func ValidateExecution(resolved ResolvedConfig, allowRemote bool) error {
 	if resolved.AllowRemote != nil && !*resolved.AllowRemote && providerRequiresRemote(resolved.Config.Provider) {
 		return fmt.Errorf("postprocess config forbids remote providers: %s", resolved.Config.Provider)
 	}
-	if localOnly && providerRequiresRemote(resolved.Config.Provider) {
-		return fmt.Errorf("postprocess provider %s is not allowed when local-only mode is enabled", resolved.Config.Provider)
+	if !allowRemote && providerRequiresRemote(resolved.Config.Provider) {
+		return fmt.Errorf(
+			"postprocess provider %s requires remote access; rerun with --postprocess-allow-remote",
+			resolved.Config.Provider,
+		)
 	}
 	return nil
 }

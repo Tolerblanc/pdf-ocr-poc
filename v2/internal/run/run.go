@@ -15,15 +15,16 @@ import (
 )
 
 type Options struct {
-	InputPDF              string
-	OutputDir             string
-	Profile               string
-	LocalOnly             bool
-	MaxWorkers            int
-	MaxWorkersMode        string
-	PostprocessProvider   string
-	PostprocessConfigPath string
-	OnProgress            provider.ProgressHandler
+	InputPDF               string
+	OutputDir              string
+	Profile                string
+	LocalOnly              bool
+	PostprocessAllowRemote bool
+	MaxWorkers             int
+	MaxWorkersMode         string
+	PostprocessProvider    string
+	PostprocessConfigPath  string
+	OnProgress             provider.ProgressHandler
 }
 
 type Output struct {
@@ -57,7 +58,7 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 	if err != nil {
 		return Output{}, err
 	}
-	if err := postprocess.ValidateExecution(resolvedPostprocess, opts.LocalOnly); err != nil {
+	if err := postprocess.ValidateExecution(resolvedPostprocess, opts.PostprocessAllowRemote); err != nil {
 		return Output{}, err
 	}
 
@@ -76,6 +77,16 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 		return Output{}, err
 	}
 
+	ocrElapsed := time.Since(start).Seconds()
+	localOnlyReportPath := filepath.Join(opts.OutputDir, "local_only_report.json")
+	monitorOK, err := writeLocalOnlyReport(localOnlyReportPath, opts.LocalOnly, result, ocrElapsed)
+	if err != nil {
+		return Output{}, err
+	}
+	if opts.LocalOnly && !monitorOK {
+		return Output{}, fmt.Errorf("local-only violation detected during provider execution")
+	}
+
 	postprocessProvider, err := postprocess.New(resolvedPostprocess.Config.Provider)
 	if err != nil {
 		return Output{}, err
@@ -86,7 +97,7 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 		OCRProvider: p.Name(),
 		OCRResult:   result,
 		Config:      resolvedPostprocess.Config,
-		LocalOnly:   opts.LocalOnly,
+		AllowRemote: opts.PostprocessAllowRemote,
 		OnProgress:  opts.OnProgress,
 	})
 	if err != nil {
@@ -131,6 +142,8 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 		"effective_max_workers":     opts.MaxWorkers,
 		"max_workers_mode":          opts.MaxWorkersMode,
 		"local_only":                opts.LocalOnly,
+		"ocr_local_only":            opts.LocalOnly,
+		"postprocess_allow_remote":  opts.PostprocessAllowRemote,
 		"elapsed_seconds":           elapsed,
 		"pages":                     pages,
 		"pages_per_minute":          pagesPerMinute,
@@ -155,7 +168,15 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 		return Output{}, err
 	}
 
-	localOnlyReportPath := filepath.Join(opts.OutputDir, "local_only_report.json")
+	return Output{
+		RunReportPath:       runReportPath,
+		LocalOnlyReportPath: localOnlyReportPath,
+		Result:              result,
+		Postprocess:         postprocessOutput,
+	}, nil
+}
+
+func writeLocalOnlyReport(path string, localOnly bool, result provider.Result, elapsed float64) (bool, error) {
 	selfcheckOK := true
 	selfcheckMessage := "local-only monitor not required for this provider"
 	if result.LocalOnlySelfcheckSet {
@@ -171,7 +192,9 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 	monitorOK := selfcheckOK && len(monitorViolations) == 0
 
 	localOnlyReport := map[string]any{
-		"local_only_mode":              opts.LocalOnly,
+		"scope":                        "ocr_provider",
+		"local_only_mode":              localOnly,
+		"ocr_local_only_mode":          localOnly,
 		"selfcheck_ok":                 selfcheckOK,
 		"selfcheck_message":            selfcheckMessage,
 		"monitor_samples":              result.MonitorSamples,
@@ -179,19 +202,10 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 		"remote_connection_violations": monitorViolations,
 		"monitor_ok":                   monitorOK,
 	}
-	if err := writeJSON(localOnlyReportPath, localOnlyReport); err != nil {
-		return Output{}, err
+	if err := writeJSON(path, localOnlyReport); err != nil {
+		return false, err
 	}
-	if opts.LocalOnly && !monitorOK {
-		return Output{}, fmt.Errorf("local-only violation detected during provider execution")
-	}
-
-	return Output{
-		RunReportPath:       runReportPath,
-		LocalOnlyReportPath: localOnlyReportPath,
-		Result:              result,
-		Postprocess:         postprocessOutput,
-	}, nil
+	return monitorOK, nil
 }
 func rebuildPrimaryArtifacts(
 	ctx context.Context,
