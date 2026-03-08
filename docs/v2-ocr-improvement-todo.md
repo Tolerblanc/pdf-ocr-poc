@@ -21,6 +21,7 @@
 - `[x]` batch tqdm 스타일 진행바에 PDF별/페이지별 진행 상태 표시 추가
 - `[x]` Swift provider에서 `max_workers` 기반 page-level 병렬 OCR 구현
 - `[x]` searchable PDF 텍스트 레이어 자동 검증 스크립트 추가
+- `[x]` `codex-headless-oauth` 후보정 provider 기본 요청/스트리밍 파서/진행 표시 연결
 
 ## 우선순위별 개선 항목
 
@@ -50,10 +51,13 @@
   - 추가 관찰: `ocr_stage_profile.json` 상 `w8`도 `max_active_recognize_workers=2`에 머물고, 별도 프로세스 shard 실험(`s4-w1`)은 `35.0s`까지 단축됨
   - 완료 조건: render/Vision 단계 병목을 분해해 worker 증가에 따른 유의미한 OCR stage 단축 근거 확보
 
-- `[ ]` **OCR 후보정(Post-correction) 레이어 추가 (요청사항 반영)**
+- `[~]` **OCR 후보정(Post-correction) 레이어 추가 (요청사항 반영)**
   - 방향: OCR 결과를 자연스럽게 보정하는 후처리 레이어를 파이프라인에 추가
   - 목적: 오타/잘못된 인식/어색한 표현을 줄이고, 후보정된 텍스트 기준으로 searchable PDF를 재생성
   - 구현 원칙: 후보정 엔진을 provider 인터페이스화해서 사용자 취향대로 backend를 꽂을 수 있게 설계
+  - 현재 상태:
+    - `codex-headless-oauth` 경로에서 remote opt-in, OAuth auth store, SSE 응답 파싱, searchable PDF 재생성, CLI 진행 표시까지 연결 완료
+    - 다음 확인 포인트: system/user prompt를 더 보수적으로 다듬어 과보정은 줄이고 유의미한 교정률을 높이는 스윗스팟 탐색
   - 선행 검토:
     - 현재 `pages.json`/`document.txt`/`document.md` 구조가 후보정 입력으로 충분한지 재검토
     - 후보정은 가능하면 page/block 단위 structured JSON을 입력으로 사용하고, bbox/reading order/원문 텍스트 provenance를 유지
