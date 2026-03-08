@@ -296,3 +296,51 @@ func TestBatchParallelWorkersAndOverride(t *testing.T) {
 		t.Fatalf("expected max_workers_override=6, got %v", reportJSON["max_workers_override"])
 	}
 }
+
+func TestBatchProgressSnapshots(t *testing.T) {
+	temp := t.TempDir()
+	inputDir := filepath.Join(temp, "in")
+	writePDF(t, filepath.Join(inputDir, "a.pdf"))
+	writePDF(t, filepath.Join(inputDir, "b.pdf"))
+
+	outDir := filepath.Join(temp, "out")
+	var mu sync.Mutex
+	snapshots := []ProgressSnapshot{}
+	_, err := Run(context.Background(), &countingProvider{}, Options{
+		InputPath:      inputDir,
+		OutputRoot:     outDir,
+		Profile:        "fast",
+		LocalOnly:      true,
+		MaxWorkers:     0,
+		MaxWorkersMode: "auto",
+		Workers:        2,
+		Resume:         false,
+		Recursive:      false,
+		RetryFailed:    0,
+		OnProgress: func(snapshot ProgressSnapshot) {
+			mu.Lock()
+			snapshots = append(snapshots, snapshot)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("batch run failed: %v", err)
+	}
+
+	mu.Lock()
+	copied := append([]ProgressSnapshot(nil), snapshots...)
+	mu.Unlock()
+	if len(copied) < 3 {
+		t.Fatalf("expected at least 3 progress snapshots, got %d", len(copied))
+	}
+	if copied[0].Phase != ProgressPhaseStart {
+		t.Fatalf("expected first snapshot to be start, got %s", copied[0].Phase)
+	}
+	last := copied[len(copied)-1]
+	if last.Phase != ProgressPhaseDone {
+		t.Fatalf("expected final snapshot to be done, got %s", last.Phase)
+	}
+	if last.Completed != 2 || last.Succeeded != 2 || last.Total != 2 {
+		t.Fatalf("unexpected final snapshot: %+v", last)
+	}
+}

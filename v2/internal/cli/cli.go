@@ -83,6 +83,14 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "provider error: %v\n", err)
 		return 2
 	}
+	fmt.Fprintf(
+		stderr,
+		"run config: provider=%s max-workers=%d mode=%s local-only=%t\n",
+		p.Name(),
+		workers,
+		mode,
+		*localOnly,
+	)
 
 	output, err := runpkg.Execute(context.Background(), p, runpkg.Options{
 		InputPDF:       *input,
@@ -95,6 +103,12 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "run failed: %v\n", err)
 		return 1
+	}
+	if hasString(output.Result.Warnings, "max_workers_not_applied_yet_in_swift_provider") {
+		fmt.Fprintln(
+			stderr,
+			"warning: provider reported max-workers was not applied; page OCR is running serially",
+		)
 	}
 
 	fmt.Fprintf(stdout, "run_report=%s\n", output.RunReportPath)
@@ -145,6 +159,17 @@ func batchCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "provider error: %v\n", err)
 		return 2
 	}
+	fmt.Fprintf(
+		stderr,
+		"batch config: provider=%s workers=%d max-workers=%d mode=%s local-only=%t\n",
+		p.Name(),
+		*workers,
+		resolvedMaxWorkers,
+		mode,
+		*localOnly,
+	)
+	renderer := newBatchProgressRenderer(stderr)
+	defer renderer.Finish()
 
 	report, err := batch.Run(context.Background(), p, batch.Options{
 		InputPath:      *input,
@@ -157,6 +182,7 @@ func batchCommand(args []string, stdout, stderr io.Writer) int {
 		Recursive:      *recursive,
 		Resume:         *resume,
 		RetryFailed:    *retryFailed,
+		OnProgress:     renderer.Render,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "batch failed: %v\n", err)
@@ -242,6 +268,15 @@ func printRootHelp(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  batch  run OCR provider in batch mode with resume/retry")
 	_, _ = fmt.Fprintln(w, "  eval   evaluate predicted pages against gold pages")
 	_, _ = fmt.Fprintln(w, "  selfcheck-local-only  verify local-only monitor prerequisites")
+}
+
+func hasString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }
 
 func Main() int {

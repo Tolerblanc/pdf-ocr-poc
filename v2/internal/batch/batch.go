@@ -37,6 +37,33 @@ type Options struct {
 	Recursive      bool
 	Resume         bool
 	RetryFailed    int
+	OnProgress     func(ProgressSnapshot)
+}
+
+type ProgressPhase string
+
+const (
+	ProgressPhaseStart      ProgressPhase = "start"
+	ProgressPhaseJobStarted ProgressPhase = "job_started"
+	ProgressPhaseJobDone    ProgressPhase = "job_done"
+	ProgressPhaseDone       ProgressPhase = "done"
+)
+
+type ProgressSnapshot struct {
+	Phase            ProgressPhase
+	Attempt          int
+	TotalAttempts    int
+	Total            int
+	Completed        int
+	Pending          int
+	Running          int
+	Succeeded        int
+	Failed           int
+	Skipped          int
+	EffectiveWorkers int
+	CurrentInputPDF  string
+	CurrentError     string
+	Elapsed          time.Duration
 }
 
 type Job struct {
@@ -100,7 +127,19 @@ func Run(ctx context.Context, p provider.Provider, opts Options) (Report, error)
 		return Report{}, err
 	}
 
+	start := time.Now()
+	totalAttempts := opts.RetryFailed + 1
 	effectiveWorkers := effectiveWorkersForJobs(opts.Workers, state.Jobs)
+	emitProgress(opts, buildProgressSnapshot(
+		state,
+		effectiveWorkers,
+		start,
+		ProgressPhaseStart,
+		0,
+		totalAttempts,
+		"",
+		"",
+	))
 
 	var mu sync.Mutex
 	for attempt := 0; attempt <= opts.RetryFailed; attempt++ {
@@ -108,8 +147,30 @@ func Run(ctx context.Context, p provider.Provider, opts Options) (Report, error)
 		if len(indices) == 0 {
 			continue
 		}
-		runJobs(ctx, p, opts, statePath, state, indices, &mu)
+		runJobs(
+			ctx,
+			p,
+			opts,
+			statePath,
+			state,
+			indices,
+			attempt+1,
+			totalAttempts,
+			effectiveWorkers,
+			start,
+			&mu,
+		)
 	}
+	emitProgress(opts, buildProgressSnapshot(
+		state,
+		effectiveWorkers,
+		start,
+		ProgressPhaseDone,
+		totalAttempts,
+		totalAttempts,
+		"",
+		"",
+	))
 
 	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := saveState(statePath, state); err != nil {
@@ -155,6 +216,10 @@ func runJobs(
 	statePath string,
 	state *State,
 	indices []int,
+	attempt int,
+	totalAttempts int,
+	effectiveWorkers int,
+	start time.Time,
 	mu *sync.Mutex,
 ) {
 	jobsCh := make(chan int)
@@ -173,6 +238,9 @@ func runJobs(
 		go func() {
 			defer wg.Done()
 			for idx := range jobsCh {
+				var startSnapshot ProgressSnapshot
+				var emitStart bool
+
 				mu.Lock()
 				job := state.Jobs[idx]
 				job.Status = StatusRunning
@@ -181,9 +249,23 @@ func runJobs(
 				state.Jobs[idx] = job
 				state.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 				_ = saveState(statePath, state)
+				startSnapshot = buildProgressSnapshot(
+					state,
+					effectiveWorkers,
+					start,
+					ProgressPhaseJobStarted,
+					attempt,
+					totalAttempts,
+					job.InputPDF,
+					"",
+				)
+				emitStart = true
 				mu.Unlock()
+				if emitStart {
+					emitProgress(opts, startSnapshot)
+				}
 
-				_, err := runpkg.Execute(ctx, p, runpkg.Options{
+				execOutput, err := runpkg.Execute(ctx, p, runpkg.Options{
 					InputPDF:       job.InputPDF,
 					OutputDir:      job.RunDir,
 					Profile:        opts.Profile,
@@ -192,23 +274,44 @@ func runJobs(
 					MaxWorkersMode: opts.MaxWorkersMode,
 				})
 
+				var doneSnapshot ProgressSnapshot
+				var emitDone bool
 				mu.Lock()
 				job = state.Jobs[idx]
 				job.Attempts++
 				job.CompletedAt = time.Now().UTC().Format(time.RFC3339)
+				jobErr := ""
 				if err == nil {
 					job.Status = StatusSucceeded
 					job.Retryable = false
 					job.Error = ""
+					if hasWarning(execOutput.Result.Warnings, "max_workers_not_applied_yet_in_swift_provider") {
+						jobErr = "max_workers_not_applied_yet_in_swift_provider"
+					}
 				} else {
 					job.Status = StatusFailed
 					job.Retryable = isRetryable(err)
 					job.Error = err.Error()
+					jobErr = err.Error()
 				}
 				state.Jobs[idx] = job
 				state.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 				_ = saveState(statePath, state)
+				doneSnapshot = buildProgressSnapshot(
+					state,
+					effectiveWorkers,
+					start,
+					ProgressPhaseJobDone,
+					attempt,
+					totalAttempts,
+					job.InputPDF,
+					jobErr,
+				)
+				emitDone = true
 				mu.Unlock()
+				if emitDone {
+					emitProgress(opts, doneSnapshot)
+				}
 			}
 		}()
 	}
@@ -218,6 +321,74 @@ func runJobs(
 	}
 	close(jobsCh)
 	wg.Wait()
+}
+
+func buildProgressSnapshot(
+	state *State,
+	effectiveWorkers int,
+	start time.Time,
+	phase ProgressPhase,
+	attempt int,
+	totalAttempts int,
+	currentInputPDF string,
+	currentError string,
+) ProgressSnapshot {
+	pending, running, succeeded, failed, skipped := countJobStatuses(state.Jobs)
+	return ProgressSnapshot{
+		Phase:            phase,
+		Attempt:          attempt,
+		TotalAttempts:    totalAttempts,
+		Total:            len(state.Jobs),
+		Completed:        succeeded + failed + skipped,
+		Pending:          pending,
+		Running:          running,
+		Succeeded:        succeeded,
+		Failed:           failed,
+		Skipped:          skipped,
+		EffectiveWorkers: effectiveWorkers,
+		CurrentInputPDF:  currentInputPDF,
+		CurrentError:     currentError,
+		Elapsed:          time.Since(start),
+	}
+}
+
+func emitProgress(opts Options, snapshot ProgressSnapshot) {
+	if opts.OnProgress == nil {
+		return
+	}
+	opts.OnProgress(snapshot)
+}
+
+func countJobStatuses(jobs []Job) (int, int, int, int, int) {
+	pending := 0
+	running := 0
+	succeeded := 0
+	failed := 0
+	skipped := 0
+	for _, job := range jobs {
+		switch job.Status {
+		case StatusPending:
+			pending++
+		case StatusRunning:
+			running++
+		case StatusSucceeded:
+			succeeded++
+		case StatusFailed:
+			failed++
+		case StatusSkipped:
+			skipped++
+		}
+	}
+	return pending, running, succeeded, failed, skipped
+}
+
+func hasWarning(warnings []string, target string) bool {
+	for _, warning := range warnings {
+		if warning == target {
+			return true
+		}
+	}
+	return false
 }
 
 func runnableJobIndices(jobs []Job, attempt int) []int {

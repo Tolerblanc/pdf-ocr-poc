@@ -46,6 +46,8 @@ make brew-formula URL=<release-archive-url>
   --resume
 ```
 
+`batch` now prints a tqdm-style per-PDF progress line (bar, completed/total PDFs, current PDF, throughput, ETA) to stderr.
+
 ## Evaluate
 
 ```bash
@@ -73,6 +75,7 @@ Vision provider notes:
 
 - Current implementation performs OCR and writes all contract artifacts.
 - `max_workers` is parsed but page-level parallel OCR is still TODO.
+- `ocrpoc-go run` prints effective `max-workers` mode and shows a warning when the provider reports that `max_workers` is not yet applied.
 - Build can fail if local Swift toolchain and SDK are mismatched.
 - Use `v2/providers/vision-swift/doctor.sh` to diagnose Swift toolchain issues.
 - `doctor.sh`/`build.sh` can auto-select a compatible fallback SDK; override with `SWIFT_SDK_PATH` if needed.
