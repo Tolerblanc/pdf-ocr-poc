@@ -4,7 +4,7 @@ Local-only OCR CLI for scanned Korean technical PDFs on Apple Silicon.
 
 Korean README: `README.ko.md`
 
-## Quick Start (Full Build + First Run)
+## Clone and First Run
 
 Requirements:
 
@@ -12,7 +12,29 @@ Requirements:
 - Go 1.25+
 - Command Line Tools (or Xcode) with Swift
 
-From repository root:
+```bash
+git clone https://github.com/Tolerblanc/pdf-ocr-poc.git
+cd pdf-ocr-poc
+make quickstart
+```
+
+`make quickstart` runs the doctor checks, builds the CLI, builds the bundled Vision provider when needed, verifies local-only prerequisites, and OCRs `__fixtures__/fixture.pdf` into `artifacts/v2-quickstart`.
+
+Useful overrides:
+
+```bash
+# Run your own PDF to a custom output directory
+make quickstart \
+  QUICKSTART_INPUT=./my.pdf \
+  QUICKSTART_OUT=./artifacts/my-run
+
+# Skip Swift and verify CLI wiring with the mock provider
+make quickstart \
+  QUICKSTART_PROVIDER=mock \
+  QUICKSTART_OUT=./artifacts/v2-mock-run
+```
+
+If you prefer the manual flow from repository root:
 
 ```bash
 # 1) Validate Go/Swift environment

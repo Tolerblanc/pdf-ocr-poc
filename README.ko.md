@@ -4,7 +4,7 @@ Apple Silicon 환경에서 스캔된 한국어 기술 PDF를 처리하기 위한
 
 English README: `README.md`
 
-## 빠른 시작 (전체 빌드 + 첫 실행)
+## 클론 후 첫 실행
 
 요구 사항:
 
@@ -12,7 +12,29 @@ English README: `README.md`
 - Go 1.25+
 - Swift가 포함된 Command Line Tools(또는 Xcode)
 
-저장소 루트에서 실행:
+```bash
+git clone https://github.com/Tolerblanc/pdf-ocr-poc.git
+cd pdf-ocr-poc
+make quickstart
+```
+
+`make quickstart`는 doctor 점검, CLI 빌드, 필요 시 번들 Vision provider 빌드, local-only 사전 점검, `__fixtures__/fixture.pdf` OCR 실행까지 한 번에 수행하고 결과를 `artifacts/v2-quickstart`에 남깁니다.
+
+자주 쓰는 오버라이드 예시:
+
+```bash
+# 내 PDF를 원하는 출력 경로로 실행
+make quickstart \
+  QUICKSTART_INPUT=./my.pdf \
+  QUICKSTART_OUT=./artifacts/my-run
+
+# Swift 빌드를 건너뛰고 mock provider로 CLI 동작만 확인
+make quickstart \
+  QUICKSTART_PROVIDER=mock \
+  QUICKSTART_OUT=./artifacts/v2-mock-run
+```
+
+직접 단계별로 실행하려면 저장소 루트에서:
 
 ```bash
 # 1) Go/Swift 환경 점검

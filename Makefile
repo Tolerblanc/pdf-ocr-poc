@@ -16,6 +16,7 @@ help:
 	@printf "  make doctor           # Run Go + Swift environment checks\n"
 	@printf "  make build            # Build Go CLI only\n"
 	@printf "  make build-all        # Build Go CLI + Swift provider\n"
+	@printf "  make quickstart       # Doctor, build, and run the sample PDF once\n"
 	@printf "  make test             # Run Go tests\n"
 	@printf "  make smoke            # Run smoke tests with mock provider\n"
 	@printf "  make bench-max-workers [VALUES=1,2,4,8]  # Benchmark fixture_full.pdf across max_workers values\n"
@@ -50,6 +51,29 @@ build-vision:
 	@"$(VISION_DIR)/build.sh"
 
 build-all: build-go build-vision
+
+.PHONY: quickstart
+quickstart: doctor-go build-go
+	@echo "[quickstart]"
+	@INPUT="$${QUICKSTART_INPUT:-$(ROOT_DIR)/__fixtures__/fixture.pdf}"; \
+	OUT="$${QUICKSTART_OUT:-$(ROOT_DIR)/artifacts/v2-quickstart}"; \
+	PROFILE="$${QUICKSTART_PROFILE:-fast}"; \
+	PROVIDER="$${QUICKSTART_PROVIDER:-vision-swift}"; \
+	PROVIDER_BIN="$${QUICKSTART_PROVIDER_BIN:-}"; \
+	LOCAL_ONLY="$${QUICKSTART_LOCAL_ONLY:-true}"; \
+	POSTPROCESS_PROVIDER="$${QUICKSTART_POSTPROCESS_PROVIDER:-}"; \
+	POSTPROCESS_CONFIG="$${QUICKSTART_POSTPROCESS_CONFIG:-}"; \
+	if [[ "$$PROVIDER" == "vision-swift" ]]; then \
+	  $(MAKE) doctor-swift build-vision; \
+	fi; \
+	if [[ "$$LOCAL_ONLY" == "true" ]]; then \
+	  "$(V2_BIN)" selfcheck-local-only; \
+	fi; \
+	CMD=("$(V2_BIN)" run --input "$$INPUT" --out "$$OUT" --provider "$$PROVIDER" --profile "$$PROFILE" --local-only="$$LOCAL_ONLY"); \
+	if [[ -n "$$PROVIDER_BIN" ]]; then CMD+=(--provider-bin "$$PROVIDER_BIN"); fi; \
+	if [[ -n "$$POSTPROCESS_PROVIDER" ]]; then CMD+=(--postprocess-provider "$$POSTPROCESS_PROVIDER"); fi; \
+	if [[ -n "$$POSTPROCESS_CONFIG" ]]; then CMD+=(--postprocess-config "$$POSTPROCESS_CONFIG"); fi; \
+	"$${CMD[@]}"
 
 .PHONY: test
 test:

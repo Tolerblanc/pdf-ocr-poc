@@ -2,6 +2,21 @@
 
 Go-based OCR orchestration CLI.
 
+## Quickstart From Repo Root
+
+```bash
+make quickstart
+```
+
+This is the shortest clone-to-first-run path. It runs doctor checks, builds `ocrpoc-go`, builds the bundled Vision provider when needed, and OCRs `__fixtures__/fixture.pdf` into `artifacts/v2-quickstart`.
+
+Useful overrides:
+
+```bash
+make quickstart QUICKSTART_INPUT=./my.pdf QUICKSTART_OUT=./artifacts/my-run
+make quickstart QUICKSTART_PROVIDER=mock QUICKSTART_OUT=./artifacts/v2-mock-run
+```
+
 ## Build
 
 ```bash
