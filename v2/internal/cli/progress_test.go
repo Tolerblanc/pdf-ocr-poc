@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,23 @@ import (
 	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/batch"
 	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/provider"
 )
+
+type fakeTTYWriter struct {
+	bytes.Buffer
+}
+
+func (w *fakeTTYWriter) Stat() (os.FileInfo, error) {
+	return fakeTTYInfo{}, nil
+}
+
+type fakeTTYInfo struct{}
+
+func (fakeTTYInfo) Name() string       { return "tty" }
+func (fakeTTYInfo) Size() int64        { return 0 }
+func (fakeTTYInfo) Mode() os.FileMode  { return os.ModeCharDevice }
+func (fakeTTYInfo) ModTime() time.Time { return time.Time{} }
+func (fakeTTYInfo) IsDir() bool        { return false }
+func (fakeTTYInfo) Sys() any           { return nil }
 
 func TestRenderProgressBarBoundaries(t *testing.T) {
 	bar := renderProgressBar(0, 10, 10)
@@ -23,7 +41,7 @@ func TestRenderProgressBarBoundaries(t *testing.T) {
 }
 
 func TestBatchProgressRendererDoneLine(t *testing.T) {
-	var out bytes.Buffer
+	out := fakeTTYWriter{}
 	renderer := newBatchProgressRenderer(&out)
 	renderer.Render(batch.ProgressSnapshot{
 		Phase:     batch.ProgressPhaseDone,
@@ -45,7 +63,7 @@ func TestBatchProgressRendererDoneLine(t *testing.T) {
 }
 
 func TestBatchProgressRendererShowsCurrentPDF(t *testing.T) {
-	var out bytes.Buffer
+	out := fakeTTYWriter{}
 	renderer := newBatchProgressRenderer(&out)
 	renderer.Render(batch.ProgressSnapshot{
 		Phase:           batch.ProgressPhaseJobStarted,
@@ -77,9 +95,20 @@ func TestBatchProgressRendererShowsCurrentPDF(t *testing.T) {
 }
 
 func TestRunProgressRendererShowsPageProgress(t *testing.T) {
-	var out bytes.Buffer
+	out := fakeTTYWriter{}
 	renderer := newRunProgressRenderer(&out, "/tmp/contracts/a.pdf")
 	renderer.Render(provider.ProgressEvent{
+		Phase:          "page_started",
+		Stage:          "vision_ocr",
+		CurrentPage:    2,
+		CompletedPages: 1,
+		TotalPages:     3,
+	})
+	if out.String() != "" {
+		t.Fatalf("expected page_started event to be suppressed, got: %q", out.String())
+	}
+	renderer.Render(provider.ProgressEvent{
+		Phase:          "page_done",
 		Stage:          "vision_ocr",
 		CurrentPage:    2,
 		CompletedPages: 1,
@@ -101,5 +130,36 @@ func TestRunProgressRendererShowsPageProgress(t *testing.T) {
 	}
 	if !strings.HasPrefix(printed, "\r[") {
 		t.Fatalf("expected progress bar prefix, got: %q", printed)
+	}
+}
+
+func TestRunProgressRendererUsesSparseLogsWhenNotInteractive(t *testing.T) {
+	var out bytes.Buffer
+	renderer := newRunProgressRenderer(&out, "/tmp/contracts/a.pdf")
+	renderer.Render(provider.ProgressEvent{
+		Phase:          "document_started",
+		Stage:          "vision_ocr",
+		CompletedPages: 0,
+		TotalPages:     100,
+	})
+	for page := 1; page <= 4; page++ {
+		renderer.Render(provider.ProgressEvent{
+			Phase:          "page_done",
+			Stage:          "vision_ocr",
+			CurrentPage:    page,
+			CompletedPages: page,
+			TotalPages:     100,
+		})
+	}
+
+	printed := out.String()
+	if strings.Contains(printed, "2/100 pg") || strings.Contains(printed, "3/100 pg") || strings.Contains(printed, "4/100 pg") {
+		t.Fatalf("expected sparse non-interactive logs, got: %q", printed)
+	}
+	if !strings.Contains(printed, "1/100 pg") {
+		t.Fatalf("expected first milestone to be printed, got: %q", printed)
+	}
+	if strings.Contains(printed, "\r[") {
+		t.Fatalf("expected newline logging for non-interactive writer, got: %q", printed)
 	}
 }

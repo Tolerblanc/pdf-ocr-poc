@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,7 +17,11 @@ import (
 type batchProgressRenderer struct {
 	mu                       sync.Mutex
 	w                        io.Writer
+	liveRewrite              bool
 	lastLen                  int
+	hasRendered              bool
+	lastSnapshot             batch.ProgressSnapshot
+	lastElapsed              time.Duration
 	maxWorkersWarningPrinted bool
 	activePDFs               []string
 	activeSet                map[string]struct{}
@@ -24,27 +29,33 @@ type batchProgressRenderer struct {
 }
 
 type runProgressRenderer struct {
-	mu       sync.Mutex
-	w        io.Writer
-	lastLen  int
-	inputPDF string
-	start    time.Time
+	mu          sync.Mutex
+	w           io.Writer
+	liveRewrite bool
+	lastLen     int
+	hasRendered bool
+	lastEvent   provider.ProgressEvent
+	lastElapsed time.Duration
+	inputPDF    string
+	start       time.Time
 }
 
 const maxWorkersNotAppliedWarning = "max_workers_not_applied_yet_in_swift_provider"
 
 func newBatchProgressRenderer(w io.Writer) *batchProgressRenderer {
 	return &batchProgressRenderer{
-		w:         w,
-		activeSet: make(map[string]struct{}),
+		w:           w,
+		liveRewrite: supportsLiveRewrite(w),
+		activeSet:   make(map[string]struct{}),
 	}
 }
 
 func newRunProgressRenderer(w io.Writer, inputPDF string) *runProgressRenderer {
 	return &runProgressRenderer{
-		w:        w,
-		inputPDF: filepath.Base(inputPDF),
-		start:    time.Now(),
+		w:           w,
+		liveRewrite: supportsLiveRewrite(w),
+		inputPDF:    filepath.Base(inputPDF),
+		start:       time.Now(),
 	}
 }
 
@@ -63,6 +74,9 @@ func (r *batchProgressRenderer) Render(snapshot batch.ProgressSnapshot) {
 			"warning: provider reported max-workers was not applied; page OCR is running serially",
 		)
 		r.maxWorkersWarningPrinted = true
+	}
+	if !r.shouldRenderSnapshot(snapshot) {
+		return
 	}
 
 	percent := 0.0
@@ -96,6 +110,9 @@ func (r *batchProgressRenderer) Render(snapshot batch.ProgressSnapshot) {
 	)
 
 	r.write(line, snapshot.Phase == batch.ProgressPhaseDone)
+	r.hasRendered = true
+	r.lastSnapshot = snapshot
+	r.lastElapsed = snapshot.Elapsed
 }
 
 func (r *batchProgressRenderer) updateActivePDFs(snapshot batch.ProgressSnapshot) {
@@ -187,13 +204,16 @@ func (r *batchProgressRenderer) Finish() {
 func (r *runProgressRenderer) Render(event provider.ProgressEvent) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	elapsed := time.Since(r.start)
+	if !r.shouldRenderEvent(event, elapsed) {
+		return
+	}
 
 	stage := displayStageName(event.Stage)
 	if stage == "" {
 		stage = "run"
 	}
 
-	elapsed := time.Since(r.start)
 	line := fmt.Sprintf("%s %s | %s", stage, r.inputPDF, formatDuration(elapsed))
 	if event.Stage == "vision_ocr" && event.TotalPages > 0 {
 		percent := (float64(event.CompletedPages) / float64(event.TotalPages)) * 100
@@ -218,12 +238,15 @@ func (r *runProgressRenderer) Render(event provider.ProgressEvent) {
 			stage,
 			r.inputPDF,
 		)
-		if event.CurrentPage > 0 {
+		if event.Phase == "page_done" && event.CurrentPage > 0 {
 			line += fmt.Sprintf(" p%d", event.CurrentPage)
 		}
 	}
 
 	r.writeLocked(line, false)
+	r.hasRendered = true
+	r.lastEvent = event
+	r.lastElapsed = elapsed
 }
 
 func (r *runProgressRenderer) Finish() {
@@ -249,6 +272,11 @@ func (r *batchProgressRenderer) write(line string, done bool) {
 }
 
 func (r *batchProgressRenderer) writeLocked(line string, done bool) {
+	if !r.liveRewrite {
+		_, _ = fmt.Fprintln(r.w, line)
+		r.lastLen = 0
+		return
+	}
 	if len(line) < r.lastLen {
 		line += strings.Repeat(" ", r.lastLen-len(line))
 	}
@@ -261,6 +289,11 @@ func (r *batchProgressRenderer) writeLocked(line string, done bool) {
 }
 
 func (r *runProgressRenderer) writeLocked(line string, done bool) {
+	if !r.liveRewrite {
+		_, _ = fmt.Fprintln(r.w, line)
+		r.lastLen = 0
+		return
+	}
 	if len(line) < r.lastLen {
 		line += strings.Repeat(" ", r.lastLen-len(line))
 	}
@@ -270,6 +303,121 @@ func (r *runProgressRenderer) writeLocked(line string, done bool) {
 		_, _ = fmt.Fprintln(r.w)
 		r.lastLen = 0
 	}
+}
+
+func (r *batchProgressRenderer) shouldRenderSnapshot(snapshot batch.ProgressSnapshot) bool {
+	if !r.hasRendered {
+		return true
+	}
+	if r.liveRewrite {
+		return batchSignature(snapshot) != batchSignature(r.lastSnapshot)
+	}
+	if snapshot.Phase == batch.ProgressPhaseStart || snapshot.Phase == batch.ProgressPhaseJobStarted || snapshot.Phase == batch.ProgressPhaseJobDone || snapshot.Phase == batch.ProgressPhaseDone {
+		return true
+	}
+	if snapshot.CurrentStage != r.lastSnapshot.CurrentStage {
+		return true
+	}
+	if snapshot.Completed > r.lastSnapshot.Completed && crossedMilestone(snapshot.Completed, snapshot.Total, r.lastSnapshot.Completed) {
+		return true
+	}
+	if snapshot.CompletedPages > r.lastSnapshot.CompletedPages && crossedMilestone(snapshot.CompletedPages, snapshot.TotalPages, r.lastSnapshot.CompletedPages) {
+		return true
+	}
+	return snapshot.Elapsed-r.lastElapsed >= 5*time.Second
+}
+
+func (r *runProgressRenderer) shouldRenderEvent(event provider.ProgressEvent, elapsed time.Duration) bool {
+	if event.Stage == "vision_ocr" && event.Phase == "page_started" {
+		return false
+	}
+	if !r.hasRendered {
+		return true
+	}
+	if r.liveRewrite {
+		return runSignature(event) != runSignature(r.lastEvent)
+	}
+	if event.Stage != r.lastEvent.Stage {
+		return true
+	}
+	if event.Stage == "vision_ocr" {
+		if event.Phase == "document_started" || event.Phase == "document_done" {
+			return true
+		}
+		if event.CompletedPages == 1 {
+			return true
+		}
+		if event.CompletedPages > r.lastEvent.CompletedPages && crossedMilestone(event.CompletedPages, event.TotalPages, r.lastEvent.CompletedPages) {
+			return true
+		}
+	}
+	return elapsed-r.lastElapsed >= 5*time.Second
+}
+
+func batchSignature(snapshot batch.ProgressSnapshot) string {
+	return fmt.Sprintf(
+		"%s|%d|%d|%d|%d|%d|%d|%s|%d|%d|%s",
+		snapshot.Phase,
+		snapshot.Completed,
+		snapshot.Succeeded,
+		snapshot.Failed,
+		snapshot.Skipped,
+		snapshot.Running,
+		snapshot.Total,
+		snapshot.CurrentInputPDF,
+		snapshot.CompletedPages,
+		snapshot.TotalPages,
+		snapshot.CurrentStage,
+	)
+}
+
+func runSignature(event provider.ProgressEvent) string {
+	return fmt.Sprintf(
+		"%s|%s|%d|%d",
+		event.Phase,
+		event.Stage,
+		event.CompletedPages,
+		event.TotalPages,
+	)
+}
+
+func crossedMilestone(current, total, previous int) bool {
+	if current <= 0 {
+		return false
+	}
+	if current >= total && total > 0 {
+		return true
+	}
+	if current == 1 && previous < 1 {
+		return true
+	}
+	return progressMilestone(current, total) != progressMilestone(previous, total)
+}
+
+func progressMilestone(progress, total int) int {
+	if progress <= 0 || total <= 0 {
+		return 0
+	}
+	step := total / 20
+	if step < 1 {
+		step = 1
+	}
+	return progress / step
+}
+
+func supportsLiveRewrite(w io.Writer) bool {
+	type statter interface {
+		Stat() (os.FileInfo, error)
+	}
+	file, ok := w.(statter)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 func formatBatchCounts(snapshot batch.ProgressSnapshot) string {
