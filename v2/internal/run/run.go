@@ -57,7 +57,7 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 	if err != nil {
 		return Output{}, err
 	}
-	if err := validatePostprocessExecution(resolvedPostprocess, opts.LocalOnly); err != nil {
+	if err := postprocess.ValidateExecution(resolvedPostprocess, opts.LocalOnly); err != nil {
 		return Output{}, err
 	}
 
@@ -193,21 +193,6 @@ func Execute(ctx context.Context, p provider.Provider, opts Options) (Output, er
 		Postprocess:         postprocessOutput,
 	}, nil
 }
-
-func validatePostprocessExecution(resolved postprocess.ResolvedConfig, localOnly bool) error {
-	if resolved.AllowRemote != nil && !*resolved.AllowRemote && postprocessProviderRequiresRemote(resolved.Config.Provider) {
-		return fmt.Errorf("postprocess config forbids remote providers: %s", resolved.Config.Provider)
-	}
-	if localOnly && postprocessProviderRequiresRemote(resolved.Config.Provider) {
-		return fmt.Errorf("postprocess provider %s is not allowed when local-only mode is enabled", resolved.Config.Provider)
-	}
-	return nil
-}
-
-func postprocessProviderRequiresRemote(name string) bool {
-	return name == postprocess.ProviderCloudLLM || name == postprocess.ProviderCodexHeadlessOAuth
-}
-
 func rebuildPrimaryArtifacts(
 	ctx context.Context,
 	p provider.Provider,

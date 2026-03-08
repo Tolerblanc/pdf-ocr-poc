@@ -73,6 +73,16 @@ func validateResolvedConfig(config Config) error {
 	return nil
 }
 
+func ValidateExecution(resolved ResolvedConfig, localOnly bool) error {
+	if resolved.AllowRemote != nil && !*resolved.AllowRemote && providerRequiresRemote(resolved.Config.Provider) {
+		return fmt.Errorf("postprocess config forbids remote providers: %s", resolved.Config.Provider)
+	}
+	if localOnly && providerRequiresRemote(resolved.Config.Provider) {
+		return fmt.Errorf("postprocess provider %s is not allowed when local-only mode is enabled", resolved.Config.Provider)
+	}
+	return nil
+}
+
 func validateProfileKeys(providers map[string]Config) error {
 	for name := range providers {
 		if isSupportedProviderName(name) {
@@ -206,4 +216,13 @@ func isSupportedProviderName(value string) bool {
 		}
 	}
 	return false
+}
+
+func providerRequiresRemote(value string) bool {
+	switch NormalizeProviderName(value) {
+	case ProviderCloudLLM, ProviderCodexHeadlessOAuth:
+		return true
+	default:
+		return false
+	}
 }

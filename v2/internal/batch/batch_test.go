@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/postprocess"
 	"github.com/Tolerblanc/pdf-ocr-poc/v2/internal/provider"
 )
 
@@ -408,4 +409,35 @@ func TestBatchProgressSnapshotsIncludeProviderPageProgress(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected provider page progress snapshot, got %+v", snapshots)
+}
+
+func TestBatchFailsFastForRemotePostprocessInLocalOnlyMode(t *testing.T) {
+	temp := t.TempDir()
+	inputDir := filepath.Join(temp, "in")
+	writePDF(t, filepath.Join(inputDir, "a.pdf"))
+
+	providerCapture := &countingProvider{}
+	_, err := Run(context.Background(), providerCapture, Options{
+		InputPath:           inputDir,
+		OutputRoot:          filepath.Join(temp, "out"),
+		Profile:             "fast",
+		LocalOnly:           true,
+		MaxWorkers:          1,
+		MaxWorkersMode:      "manual",
+		PostprocessProvider: postprocess.ProviderCodexHeadlessOAuth,
+		Workers:             1,
+		Resume:              false,
+		Recursive:           false,
+		RetryFailed:         0,
+	})
+	if err == nil {
+		t.Fatalf("expected local-only postprocess error")
+	}
+
+	providerCapture.mu.Lock()
+	calls := providerCapture.calls
+	providerCapture.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("expected provider not to run, got %d calls", calls)
+	}
 }

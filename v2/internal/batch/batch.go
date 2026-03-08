@@ -128,12 +128,16 @@ func Run(ctx context.Context, p provider.Provider, opts Options) (Report, error)
 		return Report{}, err
 	}
 
-	statePath := filepath.Join(opts.OutputRoot, "batch_state.json")
-	state, err := loadOrInitState(statePath, p.Name(), pdfs, opts)
+	resolvedPostprocess, err := postprocess.ResolveConfig(opts.PostprocessProvider, opts.PostprocessConfigPath)
 	if err != nil {
 		return Report{}, err
 	}
-	resolvedPostprocess, err := postprocess.ResolveConfig(opts.PostprocessProvider, opts.PostprocessConfigPath)
+	if err := postprocess.ValidateExecution(resolvedPostprocess, opts.LocalOnly); err != nil {
+		return Report{}, err
+	}
+
+	statePath := filepath.Join(opts.OutputRoot, "batch_state.json")
+	state, err := loadOrInitState(statePath, p.Name(), pdfs, opts)
 	if err != nil {
 		return Report{}, err
 	}
